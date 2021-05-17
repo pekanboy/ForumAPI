@@ -26,6 +26,8 @@ func main() {
 
 	forum := router.PathPrefix("/forum").Subrouter()
 	forum.HandleFunc("/create", handler.CreateForum).Methods(http.MethodPost)
+	forum.HandleFunc("/{slug}/details", handler.GetForum).Methods(http.MethodGet)
+	forum.HandleFunc("/{slug}/create", handler.CreateThread).Methods(http.MethodPost)
 
 	server := &http.Server{
 		Handler: router,

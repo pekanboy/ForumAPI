@@ -167,3 +167,28 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 
 	httputils.Respond(w, http.StatusCreated, forum)
 }
+
+func (h *Handlers) GetForum(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	slug := params["slug"]
+
+	forum := models.Forum{Slug: slug}
+
+	err := h.db.Get(&forum,`SELECT title, "user", posts, threads FROM forum.forum WHERE slug = $1`, slug)
+	if errors.Is(err, sql.ErrNoRows) {
+		mes := 	"Can't find forum with slug: " + slug
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, forum)
+}
+
+func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
+
+}
