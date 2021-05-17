@@ -22,6 +22,8 @@ func NewHandler(db *sqlx.DB) *Handlers {
 	}
 }
 
+// USER
+
 func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	nickname := params["nickname"]
@@ -124,4 +126,44 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputils.Respond(w, http.StatusOK, user)
+}
+
+// FORUM
+
+func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
+	forum := models.Forum{Posts: 0, Threads: 0}
+
+	if err := json.NewDecoder(r.Body).Decode(&forum); err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	var contained string
+	err := h.db.Get(&contained,`SELECT nickname FROM forum."user" WHERE nickname = $1`, forum.User)
+	if errors.Is(err, sql.ErrNoRows) {
+		mes := 	"Can't find user with nickname: " + forum.User
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	_, err = h.db.NamedExec(`INSERT INTO forum.forum(title, "user", slug, posts, threads) VALUES (:title, :user, :slug, :posts, :threads)`, &forum)
+	if driverErr, ok := err.(pgx.PgError); ok {
+		if driverErr.Code == "23505" {
+			var result models.Forum
+			err := h.db.Get(&result, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1`, forum.Slug)
+			if err != nil {
+				httputils.Respond(w, http.StatusInternalServerError, nil)
+				return
+			}
+			httputils.Respond(w, http.StatusConflict, result)
+			return
+		}
+	}
+
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	httputils.Respond(w, http.StatusCreated, forum)
 }

@@ -24,6 +24,9 @@ func main() {
 	user.HandleFunc("/{nickname}/profile", handler.GetUser).Methods(http.MethodGet)
 	user.HandleFunc("/{nickname}/profile", handler.ChangeUser).Methods(http.MethodPost)
 
+	forum := router.PathPrefix("/forum").Subrouter()
+	forum.HandleFunc("/create", handler.CreateForum).Methods(http.MethodPost)
+
 	server := &http.Server{
 		Handler: router,
 		Addr:    ":5000",
