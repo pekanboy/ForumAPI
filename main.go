@@ -21,6 +21,8 @@ func main() {
 
 	user := router.PathPrefix("/user").Subrouter()
 	user.HandleFunc("/{nickname}/create", handler.CreateUser).Methods(http.MethodPost)
+	user.HandleFunc("/{nickname}/profile", handler.GetUser).Methods(http.MethodGet)
+	user.HandleFunc("/{nickname}/profile", handler.ChangeUser).Methods(http.MethodPost)
 
 	server := &http.Server{
 		Handler: router,
