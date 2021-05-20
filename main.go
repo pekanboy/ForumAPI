@@ -28,6 +28,15 @@ func main() {
 	forum.HandleFunc("/create", handler.CreateForum).Methods(http.MethodPost)
 	forum.HandleFunc("/{slug}/details", handler.GetForum).Methods(http.MethodGet)
 	forum.HandleFunc("/{slug}/create", handler.CreateThread).Methods(http.MethodPost)
+	forum.HandleFunc("/{slug}/users", handler.GetForumUsers).Methods(http.MethodGet)
+
+	thread := router.PathPrefix("/thread").Subrouter()
+	thread.HandleFunc("/{slug_or_id}/create", handler.CreatePost).Methods(http.MethodPost)
+	thread.HandleFunc("/{slug_or_id}/details", handler.GetThread).Methods(http.MethodGet)
+	thread.HandleFunc("/{slug_or_id}/details", handler.ChangeThread).Methods(http.MethodPost)
+
+	service := router.PathPrefix("/service").Subrouter()
+	service.HandleFunc("/clear", handler.AllClear).Methods(http.MethodPost)
 
 	server := &http.Server{
 		Handler: router,
