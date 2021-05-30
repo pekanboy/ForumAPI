@@ -11,6 +11,7 @@ import (
 	"server/httputils"
 	"server/models"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -316,6 +317,99 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputils.Respond(w, http.StatusOK, threads)
+}
+
+// POST
+
+func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	post := params["id"]
+
+	var related []string
+	related = strings.Split(r.URL.Query().Get("related"), ",")
+
+	result := struct {
+		Post   models.Post   `json:"post"`
+		Thread models.Thread `json:"thread,omitempty"`
+		Forum  models.Forum  `json:"forum,omitempty"`
+		User   models.User   `json:"author,omitempty"`
+	}{}
+
+	err := h.db.Get(&result.Post, `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1`, post)
+	if err != nil {
+		mes := "Can't find post with id: " + post
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	for _, item := range related {
+		if item == "user" {
+			err = h.db.Get(&result.User, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1`, result.Post.Author)
+		}
+		if item == "forum" {
+			err = h.db.Get(&result.Forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1`, result.Post.Forum)
+		}
+		if item == "thread" {
+			err = h.db.Get(&result.Thread, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1`, result.Post.Thread)
+		}
+		if err != nil {
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+	}
+
+	httputils.Respond(w, http.StatusOK, result)
+}
+
+func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	id, err := strconv.Atoi(params["id"])
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	post := models.Post{Id: id}
+
+	if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	tx, err := h.db.Beginx()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	err = tx.QueryRowx(`UPDATE forum.post SET message = $1 and isEdited = true WHERE id = $2 RETURNING *`,
+		post.Message,
+		post.Id).Scan(
+		&post.Id,
+		&post.Parent,
+		&post.Author,
+		&post.Message,
+		&post.IsEdited,
+		&post.Forum,
+		&post.Thread,
+		&post.Created,
+	)
+
+	if err != nil {
+		mes := "Can't find post with id: " + strconv.Itoa(id)
+		httputils.Respond(w, http.StatusNotFound, mes)
+		_ = tx.Rollback()
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, post)
 }
 
 // THREAD
