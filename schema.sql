@@ -91,3 +91,32 @@ CREATE TRIGGER forum_post
     ON forum.post
     FOR EACH ROW
 EXECUTE PROCEDURE forum.forum_posts_inc();
+
+CREATE TABLE forum.vote
+(
+    id       BIGSERIAL PRIMARY KEY,
+    thread   TEXT NOT NULL,
+    nickname forum.citext NOT NULL,
+    voice    INT NOT NULL,
+    FOREIGN KEY (thread)
+        REFERENCES forum.thread (slug),
+    FOREIGN KEY (nickname)
+        REFERENCES forum.user (nickname)
+);
+
+CREATE OR REPLACE FUNCTION forum.thread_votes_inc()
+    RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE forum.thread SET votes = votes + 1 WHERE slug = NEW.thread;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS forum_post ON forum.vote;
+CREATE TRIGGER forum_post
+    AFTER INSERT
+    ON forum.vote
+    FOR EACH ROW
+EXECUTE PROCEDURE forum.thread_votes_inc();
