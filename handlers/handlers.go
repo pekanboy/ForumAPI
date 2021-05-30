@@ -398,7 +398,63 @@ func (h *Handlers) GetThread(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
-	// Todo Спросить у Олега поля приходят только те. которые надо изменить?
+	params := mux.Vars(r)
+	thread := params["slug_or_id"]
+
+	isId, err := strconv.Atoi(thread)
+	if err != nil {
+		isId = -1
+	}
+
+	result := models.Thread{Slug: thread, Id: isId}
+	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	var mes string
+	tx, err := h.db.Beginx()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	if isId == -1 {
+		err = tx.QueryRowx(`UPDATE forum.thread SET title = $1, message = $2 WHERE slug = $3 RETURNING *`,
+			result.Title,
+			result.Message,
+			result.Slug).Scan(
+				&result.Id,
+				&result.Title,
+				&result.Author,
+				&result.Forum,
+				&result.Message,
+				&result.Votes,
+				&result.Slug,
+				&result.Created)
+		mes = "Can't find thread by slug: " + thread
+	} else {
+		err = tx.QueryRowx(`UPDATE forum.thread SET title = $1, message = $2 WHERE id = $3 RETURNING *`,
+			result.Title,
+			result.Message,
+			result.Id).Scan(
+			&result.Id,
+			&result.Title,
+			&result.Author,
+			&result.Forum,
+			&result.Message,
+			&result.Votes,
+			&result.Slug,
+			&result.Created)
+		mes = "Can't find forum by id: " + thread
+	}
+
+	if err != nil {
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, result)
 }
 
 // SERVICE
@@ -446,4 +502,3 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 
 	httputils.Respond(w, http.StatusOK, nil)
 }
-
