@@ -8,8 +8,8 @@ CREATE TABLE forum.user
     id       BIGSERIAL PRIMARY KEY,
     nickname forum.citext UNIQUE NOT NULL,
     fullname TEXT                NOT NULL,
-    about    TEXT                NOT NULL,
-    email    TEXT UNIQUE         NOT NULL
+    about    TEXT,
+    email    forum.citext UNIQUE NOT NULL
 );
 
 CREATE TABLE forum.forum
@@ -95,9 +95,9 @@ EXECUTE PROCEDURE forum.forum_posts_inc();
 CREATE TABLE forum.vote
 (
     id       BIGSERIAL PRIMARY KEY,
-    thread   TEXT NOT NULL,
+    thread   TEXT         NOT NULL,
     nickname forum.citext NOT NULL,
-    voice    INT NOT NULL,
+    voice    INT          NOT NULL,
     FOREIGN KEY (thread)
         REFERENCES forum.thread (slug),
     FOREIGN KEY (nickname)
@@ -120,3 +120,7 @@ CREATE TRIGGER forum_post
     ON forum.vote
     FOR EACH ROW
 EXECUTE PROCEDURE forum.thread_votes_inc();
+
+-- SELECT nickname, fullname, about, email
+-- FROM forum."user"
+-- WHERE email = 'solus.yW0k259V92957@timoregaudium.net'

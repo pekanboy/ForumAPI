@@ -38,20 +38,13 @@ func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := h.db.Beginx()
-	if err != nil {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
-		return
-	}
-
-	_, err = tx.NamedExec(`INSERT INTO forum."user"(nickname, fullname, about, email) VALUES (:nickname, :fullname, :about, :email)`, &user)
+	_, err := h.db.NamedExec(`INSERT INTO forum."user"(nickname, fullname, about, email) VALUES (:nickname, :fullname, :about, :email)`, &user)
 	if driverErr, ok := err.(pgx.PgError); ok {
 		if driverErr.Code == "23505" {
 			var users []models.User
-			err := tx.Select(&users, `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 OR email = $2`, user.Nickname, user.Email)
+			err = h.db.Select(&users, `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 OR email = $2 LIMIT 2`, &user.Nickname, &user.Email)
 			if err != nil {
 				httputils.Respond(w, http.StatusInternalServerError, nil)
-				_ = tx.Rollback()
 				return
 			}
 			httputils.Respond(w, http.StatusConflict, users)
@@ -59,12 +52,6 @@ func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if err != nil {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
-		_ = tx.Rollback()
-		return
-	}
-
-	if err = tx.Commit(); err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
@@ -658,7 +645,6 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 
 // SERVICE
 
-//  Todo No testing
 func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 	var err error
 	tx, err := h.db.Beginx()
