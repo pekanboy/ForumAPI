@@ -3,7 +3,7 @@ package models
 import "time"
 
 type Thread struct {
-	Id      int       `json:"id" db:"id"`
+	Id      int       `json:"id,omitempty" db:"id"`
 	Title   string    `json:"title" db:"title"`
 	Author  string    `json:"author" db:"author"`
 	Forum   string    `json:"forum" db:"forum"`

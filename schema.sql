@@ -1,25 +1,25 @@
 DROP SCHEMA IF EXISTS forum CASCADE;
 CREATE SCHEMA forum;
 
-create extension if not exists citext with schema forum;
+create extension if not exists citext;
 
 CREATE TABLE forum.user
 (
     id       BIGSERIAL PRIMARY KEY,
-    nickname forum.citext UNIQUE NOT NULL,
-    fullname TEXT                NOT NULL,
+    nickname citext UNIQUE NOT NULL,
+    fullname TEXT          NOT NULL,
     about    TEXT,
-    email    forum.citext UNIQUE NOT NULL
+    email    citext UNIQUE NOT NULL
 );
 
 CREATE TABLE forum.forum
 (
     id      BIGSERIAL PRIMARY KEY,
-    title   TEXT         NOT NULL,
-    "user"  forum.citext NOT NULL,
-    slug    TEXT UNIQUE  NOT NULL,
-    posts   BIGINT       NOT NULL,
-    threads BIGINT       NOT NULL,
+    title   TEXT          NOT NULL,
+    "user"  citext        NOT NULL,
+    slug    citext UNIQUE NOT NULL,
+    posts   BIGINT        NOT NULL DEFAULT 0,
+    threads BIGINT        NOT NULL DEFAULT 0,
     FOREIGN KEY ("user")
         REFERENCES forum.user (nickname)
 );
@@ -28,11 +28,11 @@ CREATE TABLE forum.thread
 (
     id      BIGSERIAL PRIMARY KEY,
     title   TEXT                     NOT NULL,
-    author  forum.citext             NOT NULL,
-    forum   TEXT                     NOT NULL,
+    author  citext                   NOT NULL,
+    forum   citext                   NOT NULL,
     message TEXT                     NOT NULL,
-    votes   BIGINT                   NOT NULL,
-    slug    TEXT UNIQUE,
+    votes   BIGINT                   NOT NULL DEFAULT 0,
+    slug    citext UNIQUE,
     created TIMESTAMP WITH TIME ZONE NOT NULL,
     FOREIGN KEY (author)
         REFERENCES forum.user (nickname),
@@ -61,10 +61,10 @@ CREATE TABLE forum.post
 (
     id       BIGSERIAL PRIMARY KEY,
     parent   BIGINT                   NOT NULL,
-    author   forum.citext             NOT NULL,
+    author   citext                   NOT NULL,
     message  TEXT                     NOT NULL,
     isEdited BOOLEAN                  NOT NULL,
-    forum    TEXT                     NOT NULL,
+    forum    citext                   NOT NULL,
     thread   BIGINT                   NOT NULL,
     created  TIMESTAMP WITH TIME ZONE NOT NULL,
     FOREIGN KEY (author)
@@ -95,9 +95,9 @@ EXECUTE PROCEDURE forum.forum_posts_inc();
 CREATE TABLE forum.vote
 (
     id       BIGSERIAL PRIMARY KEY,
-    thread   TEXT         NOT NULL,
-    nickname forum.citext NOT NULL,
-    voice    INT          NOT NULL,
+    thread   citext NOT NULL,
+    nickname citext NOT NULL,
+    voice    BIGINT    NOT NULL,
     FOREIGN KEY (thread)
         REFERENCES forum.thread (slug),
     FOREIGN KEY (nickname)
@@ -108,19 +108,32 @@ CREATE OR REPLACE FUNCTION forum.thread_votes_inc()
     RETURNS TRIGGER AS
 $$
 BEGIN
-    UPDATE forum.thread SET votes = votes + 1 WHERE slug = NEW.thread;
+    UPDATE forum.thread SET votes = votes + NEW.voice WHERE slug = NEW.thread;
 
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS forum_post ON forum.vote;
-CREATE TRIGGER forum_post
+CREATE OR REPLACE FUNCTION forum.thread_votes_inc_2()
+    RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE forum.thread SET votes = votes + NEW.voice - OLD.voice WHERE slug = NEW.thread;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS forum_vote ON forum.vote;
+CREATE TRIGGER forum_vote
     AFTER INSERT
     ON forum.vote
     FOR EACH ROW
 EXECUTE PROCEDURE forum.thread_votes_inc();
 
--- SELECT nickname, fullname, about, email
--- FROM forum."user"
--- WHERE email = 'solus.yW0k259V92957@timoregaudium.net'
+DROP TRIGGER IF EXISTS forum_vote_2 ON forum.vote;
+CREATE TRIGGER forum_vote_2
+    BEFORE UPDATE
+    ON forum.vote
+    FOR EACH ROW
+EXECUTE PROCEDURE forum.thread_votes_inc_2();
