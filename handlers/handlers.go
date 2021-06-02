@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
 	"github.com/jmoiron/sqlx"
@@ -784,15 +783,15 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isId == -1 {
-		vote.Thread = thread
-	} else {
-		err = h.db.Get(&vote.Thread, `SELECT slug as thread FROM forum.thread WHERE id = $1`, isId)
+		err = h.db.Get(&vote.Thread, `SELECT id as thread FROM forum.thread WHERE slug = $1`, thread)
 		if err != nil {
 			mes := models.Message{}
-			mes.Message = "Can't find thread by id: " + thread
+			mes.Message = "Can't find thread by slug: " + thread
 			httputils.Respond(w, http.StatusNotFound, mes)
 			return
 		}
+	} else {
+		vote.Thread = isId
 	}
 
 	var vot int
@@ -807,7 +806,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		mes := models.Message{}
-		mes.Message = "Can't find thread by slug: " + thread
+		mes.Message = "Can't find thread by id: " + thread
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}

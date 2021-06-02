@@ -29,7 +29,7 @@ CREATE OR REPLACE FUNCTION forum.thread_votes_inc()
     RETURNS TRIGGER AS
 $$
 BEGIN
-    UPDATE forum.thread SET votes = votes + NEW.voice WHERE slug = NEW.thread;
+    UPDATE forum.thread SET votes = votes + NEW.voice WHERE id = NEW.thread;
 
     RETURN NEW;
 END;
@@ -40,7 +40,7 @@ CREATE OR REPLACE FUNCTION forum.thread_votes_inc_2()
     RETURNS TRIGGER AS
 $$
 BEGIN
-    UPDATE forum.thread SET votes = votes + NEW.voice - OLD.voice WHERE slug = NEW.thread;
+    UPDATE forum.thread SET votes = votes + NEW.voice - OLD.voice WHERE id = NEW.thread;
 
     RETURN NEW;
 END;
@@ -140,11 +140,11 @@ EXECUTE PROCEDURE forum.forum_posts_inc();
 CREATE TABLE forum.vote
 (
     id       BIGSERIAL PRIMARY KEY,
-    thread   citext NOT NULL,
+    thread   bigint NOT NULL,
     nickname citext NOT NULL,
     voice    BIGINT NOT NULL,
     FOREIGN KEY (thread)
-        REFERENCES forum.thread (slug),
+        REFERENCES forum.thread (id),
     FOREIGN KEY (nickname)
         REFERENCES forum.user (nickname)
 );
