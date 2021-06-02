@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
 	"github.com/jmoiron/sqlx"
@@ -295,10 +296,72 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var users []models.User
-	if desc {
-		err = h.db.Get(&users, `select u.nickname, u.fullname, u.about, u.email from forum.user u inner join forum.thread t on t.author = u.nickname and t.forum = $1 where u.nickname in (select p.author from forum.post p where p.forum = $1 and p.author = u.nickname and u.nickname > $3) order by u.nickname desc limit $2`, &forum, &limit, &since)
+	if since == "" {
+		if desc {
+			err = h.db.Select(&users,
+				  `select DISTINCT u.nickname, u.fullname, u.about, u.email 
+						from forum.user u
+								 left join forum.thread t on t.author = u.nickname and t.forum = $1
+								 left join
+							 (select p.author
+							  from forum.post p
+							  where p.forum = $1) as p
+							 on p.author = u.nickname
+						where (t.id is not null or p.author is not null)
+						order by u.nickname desc 
+					limit $2`,
+				&forum,
+				&limit)
+		} else {
+			err = h.db.Select(&users,
+				  `select DISTINCT u.nickname, u.fullname, u.about, u.email 
+						from forum.user u
+								 left join forum.thread t on t.author = u.nickname and t.forum = $1
+								 left join
+							 (select p.author
+							  from forum.post p
+							  where p.forum = $1) as p
+							 on p.author = u.nickname
+						where (t.id is not null or p.author is not null)
+						order by u.nickname 
+					    limit $2`,
+				&forum,
+				&limit)
+		}
 	} else {
-		err = h.db.Get(&users, `select u.nickname, u.fullname, u.about, u.email from forum.user u inner join forum.thread t on t.author = u.nickname and t.forum = $1 where u.nickname in (select p.author from forum.post p where p.forum = $1 and p.author = u.nickname and u.nickname > $3) order by u.nickname asc limit $2`, &forum, &limit, &since)
+		if desc {
+			err = h.db.Select(&users,
+				`select DISTINCT u.nickname, u.fullname, u.about, u.email 
+						from forum.user u
+								 left join forum.thread t on t.author = u.nickname and t.forum = $1
+								 left join
+							 (select p.author
+							  from forum.post p
+							  where p.forum = $1) as p
+							 on p.author = u.nickname
+						where (t.id is not null or p.author is not null) and u.nickname < $3
+						order by u.nickname desc 
+					limit $2`,
+				&forum,
+				&limit,
+				&since)
+		} else {
+			err = h.db.Select(&users,
+				`select DISTINCT u.nickname, u.fullname, u.about, u.email 
+						from forum.user u
+								 left join forum.thread t on t.author = u.nickname and t.forum = $1
+								 left join
+							 (select p.author
+							  from forum.post p
+							  where p.forum = $1) as p
+							 on p.author = u.nickname
+						where (t.id is not null or p.author is not null) and u.nickname > $3
+						order by u.nickname asc 
+					limit $2`,
+				&forum,
+				&limit,
+				&since)
+		}
 	}
 
 	if err != nil {
@@ -306,7 +369,11 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	httputils.Respond(w, http.StatusOK, users)
+	if users == nil {
+		httputils.Respond(w, http.StatusOK, []models.User{})
+	} else {
+		httputils.Respond(w, http.StatusOK, users)
+	}
 }
 
 func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
@@ -399,14 +466,15 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 	var related []string
 	related = strings.Split(r.URL.Query().Get("related"), ",")
 
-	result := struct {
-		Post   models.Post   `json:"post"`
-		Thread models.Thread `json:"thread,omitempty"`
-		Forum  models.Forum  `json:"forum,omitempty"`
-		User   models.User   `json:"author,omitempty"`
-	}{}
+	var result struct {
+		Post   *models.Post   `json:"post,omitempty"`
+		Thread *models.Thread `json:"thread,omitempty"`
+		Forum  *models.Forum  `json:"forum,omitempty"`
+		User   *models.User   `json:"author,omitempty"`
+	}
 
-	err := h.db.Get(&result.Post, `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1`, post)
+	var p models.Post
+	err := h.db.Get(&p, `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1`, post)
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find post with id: " + post
@@ -414,15 +482,24 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	result.Post = &p
+
+	var user models.User
+	var forum models.Forum
+	var thread models.Thread
+
 	for _, item := range related {
 		if item == "user" {
-			err = h.db.Get(&result.User, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1`, result.Post.Author)
+			err = h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1`, result.Post.Author)
+			result.User = &user
 		}
 		if item == "forum" {
-			err = h.db.Get(&result.Forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1`, result.Post.Forum)
+			err = h.db.Get(&forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1`, result.Post.Forum)
+			result.Forum = &forum
 		}
 		if item == "thread" {
-			err = h.db.Get(&result.Thread, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1`, result.Post.Thread)
+			err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1`, result.Post.Thread)
+			result.Thread = &thread
 		}
 		if err != nil {
 			httputils.Respond(w, http.StatusInternalServerError, nil)
@@ -454,7 +531,11 @@ func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = tx.QueryRowx(`UPDATE forum.post SET message = $1 and isEdited = true WHERE id = $2 RETURNING *`,
+	err = tx.QueryRowx(`
+UPDATE forum.post 
+SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
+WHERE id = $2 
+RETURNING id, parent, author, message, isEdited, forum, thread, created `,
 		post.Message,
 		post.Id).Scan(
 		&post.Id,
@@ -477,8 +558,8 @@ func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
 
 	err = tx.Commit()
 	if err != nil {
-		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
 		return
 	}
 
@@ -503,6 +584,26 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var mes models.Message
+
+	var info models.Thread
+	if isId == -1 {
+		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE slug = $1`, thread)
+		if errors.Is(err, sql.ErrNoRows) {
+			mes.Message = "Can't find post thread by slug: " + thread
+		}
+	} else {
+		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE id = $1`, isId)
+		if errors.Is(err, sql.ErrNoRows) {
+			mes.Message = "Can't find post thread by id: " + strconv.Itoa(isId)
+		}
+	}
+
+	if errors.Is(err, sql.ErrNoRows) {
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
 	tx, _ := h.db.Beginx()
 	create := time.Now()
 
@@ -517,9 +618,12 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		item.Thread = info.Id
+
 		if item.Parent != 0 {
 			var parentExiste string
-			err = tx.Get(&parentExiste, `SELECT id FROM forum.post WHERE id = $1`, item.Parent)
+			err = tx.Get(&parentExiste, `SELECT id FROM forum.post WHERE id = $1 and thread = $2`, item.Parent, item.Thread)
+
 			if err != nil {
 				mes := models.Message{}
 				mes.Message = "Parent post was created in another thread"
@@ -529,27 +633,7 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		var mes models.Message
-
-		if isId == -1 {
-			err = tx.Get(&item, `SELECT id, forum FROM forum.thread WHERE slug = $1`, thread)
-			if errors.Is(err, sql.ErrNoRows) {
-				mes.Message = "Can't find post thread by slug: " + thread
-			}
-		} else {
-			err = tx.Get(&item, `SELECT id, forum FROM forum.thread WHERE id = $1`, isId)
-			if errors.Is(err, sql.ErrNoRows) {
-				mes.Message = "Can't find post thread by id: " + strconv.Itoa(isId)
-			}
-		}
-
-		if errors.Is(err, sql.ErrNoRows) {
-			httputils.Respond(w, http.StatusNotFound, mes)
-			_ = tx.Rollback()
-			return
-		}
-
-		item.Thread = item.Id
+		item.Forum = info.Forum
 		item.Created = create
 		item.IsEdited = false
 
@@ -629,7 +713,7 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isId == -1 {
-		err = tx.QueryRowx(`UPDATE forum.thread SET title = $1, message = $2 WHERE slug = $3 RETURNING *`,
+		err = tx.QueryRowx(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *`,
 			result.Title,
 			result.Message,
 			result.Slug).Scan(
@@ -643,7 +727,7 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 			&result.Created)
 		mes.Message = "Can't find thread by slug: " + thread
 	} else {
-		err = tx.QueryRowx(`UPDATE forum.thread SET title = $1, message = $2 WHERE id = $3 RETURNING *`,
+		err = tx.QueryRowx(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *`,
 			result.Title,
 			result.Message,
 			result.Id).Scan(
@@ -666,8 +750,8 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 
 	err = tx.Commit()
 	if err != nil {
-		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
 		return
 	}
 
@@ -736,6 +820,218 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httputils.Respond(w, http.StatusOK, result)
+}
+
+func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
+	params := mux.Vars(r)
+	thread := params["slug_or_id"]
+
+	isId, err := strconv.Atoi(thread)
+	if err != nil {
+		isId = -1
+	}
+
+	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
+	if err != nil {
+		limit = 100
+	}
+
+	since, err := strconv.Atoi(r.URL.Query().Get("since"))
+	if err != nil {
+		since = 0
+	}
+
+	sort := r.URL.Query().Get("sort")
+
+	desc, err := strconv.ParseBool(r.URL.Query().Get("desc"))
+	if err != nil {
+		desc = false
+	}
+
+	var id int
+	if isId != -1 {
+		id = isId
+		rows, err := h.db.Query(`SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
+		if err != nil {
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		if !rows.Next() {
+			mes := models.Message{}
+			mes.Message = "Can't find thread by id: " + thread
+			httputils.Respond(w, http.StatusNotFound, mes)
+			return
+		}
+
+		_ = rows.Close()
+	} else {
+		err = h.db.Get(&id, `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
+		if err != nil {
+			mes := models.Message{}
+			mes.Message = "Can't find thread by slug: " + thread
+			httputils.Respond(w, http.StatusNotFound, mes)
+			return
+		}
+	}
+
+	var posts []models.Post
+
+	// Float
+	switch sort {
+	case "tree":
+		if since == 0 {
+			if desc {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE thread = $1 
+							ORDER BY path DESC, id DESC 
+							LIMIT $2`,
+							id, limit)
+			} else {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE thread = $1 
+							ORDER BY path, id 
+							LIMIT $2`,
+					id, limit)
+			}
+		} else {
+			if desc {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE thread = $1 and path < (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)
+							ORDER BY path DESC, id DESC 
+							LIMIT $2`,
+					id, limit, since)
+			} else {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE thread = $1 and path > (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)
+							ORDER BY path, id 
+							LIMIT $2`,
+					id, limit, since)
+			}
+		}
+	case "parent_tree":
+		if since == 0 {
+			if desc {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE path[1] IN (
+								SELECT id 
+								FROM forum.post 
+								WHERE thread = $1 and parent = 0
+								ORDER BY id DESC 
+								LIMIT $2)
+							ORDER BY path[1] DESC, path, id`,
+							id, limit)
+			} else {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE path[1] IN (
+								SELECT id 
+								FROM forum.post 
+								WHERE thread = $1 AND parent = 0
+								ORDER BY id
+								LIMIT $2)
+							ORDER BY path`,
+							id, limit)
+			}
+		} else {
+			if desc {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE path[1] IN (
+								SELECT id 
+								FROM forum.post 
+								WHERE thread = $1 AND parent = 0 and path[1] < (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)
+								ORDER BY id DESC 
+								LIMIT $2)
+							ORDER BY path[1] DESC, path, id`,
+							id, limit, since)
+			} else {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+							FROM forum.post
+							WHERE path[1] in (
+								SELECT id 
+								FROM forum.post 
+								WHERE thread = $1 AND parent = 0 and path[1] > (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)
+								ORDER BY id ASC
+								LIMIT $2)
+							ORDER BY path, id`,
+					id, limit, since)
+			}
+		}
+	default:
+		if since == 0 {
+			if desc {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
+					   FROM forum.post
+					   WHERE thread = $1
+					   ORDER BY id DESC
+					   LIMIT $2`,
+					id,
+					limit,
+				)
+			} else {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
+					   FROM forum.post
+					   WHERE thread = $1
+					   ORDER BY id
+					   LIMIT $2`,
+					id,
+					limit,
+				)
+			}
+		} else {
+			if desc {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
+					   FROM forum.post
+					   WHERE thread = $1 and id < $3
+					   ORDER BY id DESC
+					   LIMIT $2`,
+					id,
+					limit,
+					since,
+				)
+			} else {
+				err = h.db.Select(&posts,
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
+					   FROM forum.post
+					   WHERE thread = $1 and id > $3
+					   ORDER BY id
+					   LIMIT $2`,
+					id,
+					limit,
+					since,
+				)
+			}
+		}
+	}
+
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	if posts == nil {
+		httputils.Respond(w, http.StatusOK, []models.Post{})
+		return
+	}
+	httputils.Respond(w, http.StatusOK, posts)
+
 }
 
 // SERVICE

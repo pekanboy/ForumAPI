@@ -40,6 +40,7 @@ func main() {
 	thread.HandleFunc("/{slug_or_id}/details", handler.GetThread).Methods(http.MethodGet)
 	thread.HandleFunc("/{slug_or_id}/details", handler.ChangeThread).Methods(http.MethodPost)
 	thread.HandleFunc("/{slug_or_id}/vote", handler.CreateVote).Methods(http.MethodPost)
+	thread.HandleFunc("/{slug_or_id}/posts", handler.ThreadPosts).Methods(http.MethodGet)
 
 	service := router.PathPrefix("/service").Subrouter()
 	service.HandleFunc("/clear", handler.AllClear).Methods(http.MethodPost)

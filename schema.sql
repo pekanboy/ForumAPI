@@ -3,14 +3,72 @@ CREATE SCHEMA forum;
 
 create extension if not exists citext;
 
+-- FUNCTIONS
+
+CREATE OR REPLACE FUNCTION forum.forum_posts_inc()
+    RETURNS TRIGGER AS
+$$
+DECLARE
+    parentPath         BIGINT[];
+BEGIN
+    IF (NEW.parent IS NULL) THEN
+        NEW.path := array_append(new.path, new.id);
+    ELSE
+        SELECT path FROM forum.post WHERE id = new.parent INTO parentPath;
+        NEW.path := NEW.path || parentPath || new.id;
+    end if;
+
+    UPDATE forum.forum SET posts = posts + 1 WHERE slug = NEW.forum;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION forum.thread_votes_inc()
+    RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE forum.thread SET votes = votes + NEW.voice WHERE slug = NEW.thread;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION forum.thread_votes_inc_2()
+    RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE forum.thread SET votes = votes + NEW.voice - OLD.voice WHERE slug = NEW.thread;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+
+CREATE OR REPLACE FUNCTION forum.forum_threads_inc()
+    RETURNS TRIGGER AS
+$$
+BEGIN
+    UPDATE forum.forum SET threads = threads + 1 WHERE slug = NEW.forum;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+--  USER
+
 CREATE TABLE forum.user
 (
     id       BIGSERIAL PRIMARY KEY,
-    nickname citext UNIQUE NOT NULL,
-    fullname TEXT          NOT NULL,
+    nickname citext collate "POSIX" UNIQUE NOT NULL,
+    fullname TEXT                          NOT NULL,
     about    TEXT,
-    email    citext UNIQUE NOT NULL
+    email    citext UNIQUE                 NOT NULL
 );
+
+-- FORUM
 
 CREATE TABLE forum.forum
 (
@@ -23,6 +81,8 @@ CREATE TABLE forum.forum
     FOREIGN KEY ("user")
         REFERENCES forum.user (nickname)
 );
+
+-- THREAD
 
 CREATE TABLE forum.thread
 (
@@ -40,22 +100,14 @@ CREATE TABLE forum.thread
         REFERENCES forum.forum (slug)
 );
 
-CREATE OR REPLACE FUNCTION forum.forum_threads_inc()
-    RETURNS TRIGGER AS
-$$
-BEGIN
-    UPDATE forum.forum SET threads = threads + 1 WHERE slug = NEW.forum;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS forum_thread ON forum.thread;
 CREATE TRIGGER forum_thread
     AFTER INSERT
     ON forum.thread
     FOR EACH ROW
 EXECUTE PROCEDURE forum.forum_threads_inc();
+
+-- POST
 
 CREATE TABLE forum.post
 (
@@ -67,6 +119,7 @@ CREATE TABLE forum.post
     forum    citext                   NOT NULL,
     thread   BIGINT                   NOT NULL,
     created  TIMESTAMP WITH TIME ZONE NOT NULL,
+    path     BIGINT[]                 NOT NULL DEFAULT ARRAY []::INTEGER[],
     FOREIGN KEY (author)
         REFERENCES forum.user (nickname),
     FOREIGN KEY (forum)
@@ -75,54 +128,26 @@ CREATE TABLE forum.post
         REFERENCES forum.thread (id)
 );
 
-CREATE OR REPLACE FUNCTION forum.forum_posts_inc()
-    RETURNS TRIGGER AS
-$$
-BEGIN
-    UPDATE forum.forum SET posts = posts + 1 WHERE slug = NEW.forum;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
 DROP TRIGGER IF EXISTS forum_post ON forum.post;
 CREATE TRIGGER forum_post
-    AFTER INSERT
+    BEFORE INSERT
     ON forum.post
     FOR EACH ROW
 EXECUTE PROCEDURE forum.forum_posts_inc();
+
+-- VOTE
 
 CREATE TABLE forum.vote
 (
     id       BIGSERIAL PRIMARY KEY,
     thread   citext NOT NULL,
     nickname citext NOT NULL,
-    voice    BIGINT    NOT NULL,
+    voice    BIGINT NOT NULL,
     FOREIGN KEY (thread)
         REFERENCES forum.thread (slug),
     FOREIGN KEY (nickname)
         REFERENCES forum.user (nickname)
 );
-
-CREATE OR REPLACE FUNCTION forum.thread_votes_inc()
-    RETURNS TRIGGER AS
-$$
-BEGIN
-    UPDATE forum.thread SET votes = votes + NEW.voice WHERE slug = NEW.thread;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-
-CREATE OR REPLACE FUNCTION forum.thread_votes_inc_2()
-    RETURNS TRIGGER AS
-$$
-BEGIN
-    UPDATE forum.thread SET votes = votes + NEW.voice - OLD.voice WHERE slug = NEW.thread;
-
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
 
 DROP TRIGGER IF EXISTS forum_vote ON forum.vote;
 CREATE TRIGGER forum_vote
