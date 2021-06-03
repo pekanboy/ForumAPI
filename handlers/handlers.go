@@ -403,7 +403,7 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		if desc {
 			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, t.slug, t.created 
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
 						from forum.thread t 
 						where t.forum = $1
 						order by t.created desc 
@@ -412,7 +412,7 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 				&limit)
 		} else {
 			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, t.slug, t.created 
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
 						from forum.thread t 
 						where t.forum = $1
 						order by t.created 
@@ -423,7 +423,7 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	} else {
 		if desc {
 			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, t.slug, t.created 
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
 						from forum.thread t 
 						where t.forum = $1 and t.created <= $3 
 						order by t.created desc 
@@ -433,7 +433,7 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 				&since)
 		} else {
 			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, t.slug, t.created 
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
 						from forum.thread t 
 						where t.forum = $1 and t.created >= $3 
 						order by t.created 
@@ -497,7 +497,7 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 			result.Forum = &forum
 		}
 		if item == "thread" {
-			err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1`, result.Post.Thread)
+			err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1`, result.Post.Thread)
 			result.Thread = &thread
 		}
 		if err != nil {

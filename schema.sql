@@ -162,3 +162,10 @@ CREATE TRIGGER forum_vote_2
     ON forum.vote
     FOR EACH ROW
 EXECUTE PROCEDURE forum.thread_votes_inc_2();
+
+
+select t.id, t.title, t.author, t.forum, t.message, t.votes, t.slug, t.created
+from forum.thread t
+where t.forum = 'Z4JT8VRS28FFS'
+order by t.created
+limit 15
