@@ -171,7 +171,7 @@ EXECUTE PROCEDURE forum.thread_votes_inc();
 
 DROP TRIGGER IF EXISTS forum_vote_2 ON forum.vote;
 CREATE TRIGGER forum_vote_2
-    BEFORE UPDATE
+    AFTER UPDATE
     ON forum.vote
     FOR EACH ROW
 EXECUTE PROCEDURE forum.thread_votes_inc_2();
@@ -184,10 +184,12 @@ CREATE TABLE forum.forum_users
     nickname citext collate "POSIX" NOT NULL,
     fullname TEXT                   NOT NULL,
     about    TEXT,
-    email    citext UNIQUE          NOT NULL,
+    email    citext          NOT NULL,
     FOREIGN KEY (forum)
         REFERENCES forum.forum (slug),
     FOREIGN KEY (nickname)
         REFERENCES forum.user (nickname),
     PRIMARY KEY (nickname, forum)
 );
+
+SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = 15002 LIMIT 1

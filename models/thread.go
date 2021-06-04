@@ -1,6 +1,8 @@
 package models
 
-import "time"
+import (
+	"time"
+)
 
 type Thread struct {
 	Id      int       `json:"id,omitempty" db:"id"`

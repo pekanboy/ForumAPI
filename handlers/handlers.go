@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
 	"github.com/jmoiron/sqlx"
@@ -228,7 +229,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if thread.Created.IsZero() {
+	if thread.Created.String() == "" {
 		thread.Created = time.Now()
 	}
 
@@ -586,7 +587,7 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	tx, _ := h.db.Beginx()
-	create := time.Now()
+	create := strfmt.DateTime(time.Now())
 
 	var values string
 	var args []interface{}
@@ -619,11 +620,10 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		}
 
 		item.Forum = info.Forum
-		item.Created = create
 
 		values += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
 			i*6+1, i*6+2, i*6+3, i*6+4, i*6+5, i*6+6)
-		args = append(args, item.Parent, item.Author, item.Message, item.Forum, item.Thread, item.Created)
+		args = append(args, item.Parent, item.Author, item.Message, item.Forum, item.Thread, create)
 		if i != len {
 			values += ","
 		}
@@ -660,12 +660,14 @@ func (h *Handlers) GetThread(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
+		err = h.db.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	} else {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
+		err = h.db.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
+			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	}
 
-	if errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find thread by slug or id: " + thread
 		httputils.Respond(w, http.StatusNotFound, mes)
