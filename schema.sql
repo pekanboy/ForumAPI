@@ -72,7 +72,7 @@ $$ LANGUAGE plpgsql;
 
 --  USER
 
-CREATE TABLE forum.user
+CREATE UNLOGGED TABLE forum.user
 (
     id       BIGSERIAL PRIMARY KEY,
     nickname citext collate "POSIX" UNIQUE NOT NULL,
@@ -83,7 +83,7 @@ CREATE TABLE forum.user
 
 -- FORUM
 
-CREATE TABLE forum.forum
+CREATE UNLOGGED TABLE forum.forum
 (
     id      BIGSERIAL PRIMARY KEY,
     title   TEXT          NOT NULL,
@@ -97,7 +97,7 @@ CREATE TABLE forum.forum
 
 -- THREAD
 
-CREATE TABLE forum.thread
+CREATE UNLOGGED TABLE forum.thread
 (
     id      BIGSERIAL PRIMARY KEY,
     title   TEXT                     NOT NULL,
@@ -122,7 +122,7 @@ EXECUTE PROCEDURE forum.forum_threads_inc();
 
 -- POST
 
-CREATE TABLE forum.post
+CREATE UNLOGGED TABLE forum.post
 (
     id       BIGSERIAL PRIMARY KEY,
     parent   BIGINT                   NOT NULL,
@@ -150,7 +150,7 @@ EXECUTE PROCEDURE forum.forum_posts_inc();
 
 -- VOTE
 
-CREATE TABLE forum.vote
+CREATE UNLOGGED TABLE forum.vote
 (
     id       BIGSERIAL PRIMARY KEY,
     thread   bigint NOT NULL,
@@ -178,7 +178,7 @@ EXECUTE PROCEDURE forum.thread_votes_inc_2();
 
 -- FORUM USERS
 
-CREATE TABLE forum.forum_users
+CREATE UNLOGGED TABLE forum.forum_users
 (
     forum    citext                 NOT NULL,
     nickname citext collate "POSIX" NOT NULL,
