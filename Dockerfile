@@ -13,13 +13,14 @@ RUN apt-get -y update && apt-get install -y tzdata
 
 ENV PGVER 12
 
+COPY schema.sql /
+
 RUN apt-get -y update && apt-get install -y postgresql-$PGVER
 
 USER postgres
 
 RUN /etc/init.d/postgresql start &&\
-    psql --command "CREATE USER docker WITH SUPERUSER PASSWORD 'docker';" &&\
-    createdb -O docker docker &&\
+    psql -U postgres -d postgres -a -f schema.sql &&\
     /etc/init.d/postgresql stop
 
 RUN echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/$PGVER/main/pg_hba.conf
@@ -32,12 +33,8 @@ VOLUME  ["/etc/postgresql", "/var/log/postgresql", "/var/lib/postgresql"]
 
 USER root
 
-WORKDIR /usr/src/app
-
-COPY . .
-
-COPY --from=build /opt/app/main .
+COPY --from=build /opt/app/main /bin/
 
 EXPOSE 5000
 
-CMD service postgresql start && psql -h localhost -d docker -U docker -p 5432 -a -q -f ./schema.sql && ./main
+CMD service postgresql start && main
