@@ -10,7 +10,7 @@ CREATE OR REPLACE FUNCTION forum.forum_posts_inc()
     RETURNS TRIGGER AS
 $$
 DECLARE
-    parentPath         BIGINT[];
+    parentPath BIGINT[];
 BEGIN
     IF (NEW.parent IS NULL) THEN
         NEW.path := array_append(new.path, new.id);
@@ -116,7 +116,7 @@ CREATE TABLE forum.post
     parent   BIGINT                   NOT NULL,
     author   citext                   NOT NULL,
     message  TEXT                     NOT NULL,
-    isEdited BOOLEAN                  NOT NULL,
+    isEdited BOOLEAN                  NOT NULL DEFAULT false,
     forum    citext                   NOT NULL,
     thread   BIGINT                   NOT NULL,
     created  TIMESTAMP WITH TIME ZONE NOT NULL,
@@ -163,10 +163,3 @@ CREATE TRIGGER forum_vote_2
     ON forum.vote
     FOR EACH ROW
 EXECUTE PROCEDURE forum.thread_votes_inc_2();
-
-
-select t.id, t.title, t.author, t.forum, t.message, t.votes, t.slug, t.created
-from forum.thread t
-where t.forum = 'Z4JT8VRS28FFS'
-order by t.created
-limit 15

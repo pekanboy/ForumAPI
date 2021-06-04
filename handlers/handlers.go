@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
 	"github.com/jmoiron/sqlx"
@@ -603,10 +604,19 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if len(posts) == 0 {
+		httputils.Respond(w, http.StatusCreated, posts)
+		return
+	}
+
 	tx, _ := h.db.Beginx()
 	create := time.Now()
 
-	for index, item := range posts {
+	var values string
+	var args []interface{}
+	len := len(posts) - 1
+
+	for i, item := range posts {
 		var contained string
 		err := tx.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1`, item.Author)
 		if errors.Is(err, sql.ErrNoRows) {
@@ -634,23 +644,23 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 
 		item.Forum = info.Forum
 		item.Created = create
-		item.IsEdited = false
 
-		err = tx.QueryRowx(`INSERT INTO forum.post(parent, author, message, isEdited, forum, thread, created) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
-			item.Parent,
-			item.Author,
-			item.Message,
-			item.IsEdited,
-			item.Forum,
-			item.Thread,
-			item.Created).Scan(&item.Id)
-		if err != nil {
-			httputils.Respond(w, http.StatusInternalServerError, nil)
-			_ = tx.Rollback()
-			return
+		values += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
+			i*6+1, i*6+2, i*6+3, i*6+4, i*6+5, i*6+6)
+		args = append(args, item.Parent, item.Author, item.Message, item.Forum, item.Thread, item.Created)
+		if i != len {
+			values += ","
 		}
+	}
 
-		posts[index] = item
+	query := "INSERT INTO forum.post(parent, author, message, forum, thread, created) VALUES " + values + " RETURNING id, parent, author, message, isEdited, forum, thread, created"
+	posts = []models.Post{}
+	err = tx.Select(&posts, query, args...)
+
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
 	}
 
 	err = tx.Commit()
