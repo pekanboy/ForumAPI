@@ -21,6 +21,12 @@ BEGIN
 
     UPDATE forum.forum SET posts = posts + 1 WHERE slug = NEW.forum;
 
+    INSERT INTO forum.forum_users(forum, nickname, fullname, about, email)
+    SELECT NEW.forum, nickname, fullname, about, email
+    FROM forum.user
+    WHERE nickname = NEW.author
+    ON CONFLICT DO NOTHING;
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -53,6 +59,12 @@ CREATE OR REPLACE FUNCTION forum.forum_threads_inc()
 $$
 BEGIN
     UPDATE forum.forum SET threads = threads + 1 WHERE slug = NEW.forum;
+
+    INSERT INTO forum.forum_users(forum, nickname, fullname, about, email)
+    SELECT NEW.forum, nickname, fullname, about, email
+    FROM forum.user
+    WHERE nickname = NEW.author
+    ON CONFLICT DO NOTHING;
 
     RETURN NEW;
 END;
@@ -163,3 +175,19 @@ CREATE TRIGGER forum_vote_2
     ON forum.vote
     FOR EACH ROW
 EXECUTE PROCEDURE forum.thread_votes_inc_2();
+
+-- FORUM USERS
+
+CREATE TABLE forum.forum_users
+(
+    forum    citext                 NOT NULL,
+    nickname citext collate "POSIX" NOT NULL,
+    fullname TEXT                   NOT NULL,
+    about    TEXT,
+    email    citext UNIQUE          NOT NULL,
+    FOREIGN KEY (forum)
+        REFERENCES forum.forum (slug),
+    FOREIGN KEY (nickname)
+        REFERENCES forum.user (nickname),
+    PRIMARY KEY (nickname, forum)
+);

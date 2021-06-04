@@ -66,7 +66,7 @@ func (h *Handlers) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	user := models.User{}
 
-	err := h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1`, nickname)
+	err := h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
 
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
@@ -95,7 +95,7 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var contained string
-	err := h.db.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1`, nickname)
+	err := h.db.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + nickname
@@ -145,7 +145,7 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.db.Get(&forum.User, `SELECT nickname FROM forum."user" WHERE nickname = $1`, forum.User)
+	err := h.db.Get(&forum.User, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, forum.User)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find user with nickname: " + forum.User
@@ -161,7 +161,7 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 	if driverErr, ok := err.(pgx.PgError); ok {
 		if driverErr.Code == "23505" {
 			var result models.Forum
-			err := h.db.Get(&result, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1`, forum.Slug)
+			err := h.db.Get(&result, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, forum.Slug)
 			if err != nil {
 				httputils.Respond(w, http.StatusInternalServerError, nil)
 				return
@@ -185,7 +185,7 @@ func (h *Handlers) GetForum(w http.ResponseWriter, r *http.Request) {
 
 	forum := models.Forum{}
 
-	err := h.db.Get(&forum, `SELECT slug, title, "user", posts, threads FROM forum.forum WHERE slug = $1`, slug)
+	err := h.db.Get(&forum, `SELECT slug, title, "user", posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, slug)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find forum with slug: " + slug
@@ -212,7 +212,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.db.Get(&thread.Author, `SELECT nickname FROM forum."user" WHERE nickname = $1`, thread.Author)
+	err := h.db.Get(&thread.Author, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, thread.Author)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find thread author by nickname: " + thread.Author
@@ -220,7 +220,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = h.db.Get(&thread.Forum, `SELECT slug FROM forum.forum WHERE slug = $1`, forum)
+	err = h.db.Get(&thread.Forum, `SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find thread forum by slug: " + thread.Forum
@@ -252,7 +252,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 			err := h.db.Get(&result, `
 		SELECT id, title, author, forum, message, votes, slug, created 
 		FROM forum.thread 
-		WHERE slug = $1`,
+		WHERE slug = $1 LIMIT 1`,
 				thread.Slug)
 			if err != nil {
 				httputils.Respond(w, http.StatusInternalServerError, nil)
@@ -275,8 +275,8 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	forum := params["slug"]
 
-	var contained string
-	err := h.db.Get(&contained, `SELECT slug FROM forum.forum WHERE slug = $1`, forum)
+	var id int
+	err := h.db.Get(&id, `SELECT id FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find forum by slug: " + forum
@@ -299,64 +299,40 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		if desc {
 			err = h.db.Select(&users,
-				  `select DISTINCT u.nickname, u.fullname, u.about, u.email 
-						from forum.user u
-								 left join forum.thread t on t.author = u.nickname and t.forum = $1
-								 left join
-							 (select p.author
-							  from forum.post p
-							  where p.forum = $1) as p
-							 on p.author = u.nickname
-						where (t.id is not null or p.author is not null)
-						order by u.nickname desc 
+				  `select nickname, fullname, about, email 
+						from forum.forum_users
+						WHERE forum = $1
+						order by nickname desc 
 					limit $2`,
 				&forum,
 				&limit)
 		} else {
 			err = h.db.Select(&users,
-				  `select DISTINCT u.nickname, u.fullname, u.about, u.email 
-						from forum.user u
-								 left join forum.thread t on t.author = u.nickname and t.forum = $1
-								 left join
-							 (select p.author
-							  from forum.post p
-							  where p.forum = $1) as p
-							 on p.author = u.nickname
-						where (t.id is not null or p.author is not null)
-						order by u.nickname 
-					    limit $2`,
+				`select nickname, fullname, about, email 
+						from forum.forum_users
+						WHERE forum = $1
+						order by nickname 
+					limit $2`,
 				&forum,
 				&limit)
 		}
 	} else {
 		if desc {
 			err = h.db.Select(&users,
-				`select DISTINCT u.nickname, u.fullname, u.about, u.email 
-						from forum.user u
-								 left join forum.thread t on t.author = u.nickname and t.forum = $1
-								 left join
-							 (select p.author
-							  from forum.post p
-							  where p.forum = $1) as p
-							 on p.author = u.nickname
-						where (t.id is not null or p.author is not null) and u.nickname < $3
-						order by u.nickname desc 
+				`select nickname, fullname, about, email 
+						from forum.forum_users
+						WHERE forum = $1 and nickname < $3
+						order by nickname desc 
 					limit $2`,
 				&forum,
 				&limit,
 				&since)
 		} else {
 			err = h.db.Select(&users,
-				`select DISTINCT u.nickname, u.fullname, u.about, u.email 
-						from forum.user u
-								 left join forum.thread t on t.author = u.nickname and t.forum = $1
-								 left join
-							 (select p.author
-							  from forum.post p
-							  where p.forum = $1) as p
-							 on p.author = u.nickname
-						where (t.id is not null or p.author is not null) and u.nickname > $3
-						order by u.nickname asc 
+				`select nickname, fullname, about, email 
+						from forum.forum_users
+						WHERE forum = $1 and nickname > $3
+						order by nickname
 					limit $2`,
 				&forum,
 				&limit,
@@ -381,7 +357,7 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	forum := params["slug"]
 
 	var contained string
-	err := h.db.Get(&contained, `SELECT slug FROM forum.forum WHERE slug = $1`, forum)
+	err := h.db.Get(&contained, `SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find forum by slug: " + forum
@@ -490,15 +466,15 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 
 	for _, item := range related {
 		if item == "user" {
-			err = h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1`, result.Post.Author)
+			err = h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1 LIMIT 1`, result.Post.Author)
 			result.User = &user
 		}
 		if item == "forum" {
-			err = h.db.Get(&forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1`, result.Post.Forum)
+			err = h.db.Get(&forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, result.Post.Forum)
 			result.Forum = &forum
 		}
 		if item == "thread" {
-			err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1`, result.Post.Thread)
+			err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, result.Post.Thread)
 			result.Thread = &thread
 		}
 		if err != nil {
@@ -532,10 +508,10 @@ func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err = tx.QueryRowx(`
-UPDATE forum.post 
-SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
-WHERE id = $2 
-RETURNING id, parent, author, message, isEdited, forum, thread, created `,
+				UPDATE forum.post 
+				SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
+				WHERE id = $2 
+				RETURNING id, parent, author, message, isEdited, forum, thread, created `,
 		post.Message,
 		post.Id).Scan(
 		&post.Id,
@@ -588,12 +564,12 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 
 	var info models.Thread
 	if isId == -1 {
-		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE slug = $1`, thread)
+		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
 		if errors.Is(err, sql.ErrNoRows) {
 			mes.Message = "Can't find post thread by slug: " + thread
 		}
 	} else {
-		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE id = $1`, isId)
+		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
 		if errors.Is(err, sql.ErrNoRows) {
 			mes.Message = "Can't find post thread by id: " + strconv.Itoa(isId)
 		}
@@ -618,7 +594,7 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 
 	for i, item := range posts {
 		var contained string
-		err := tx.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1`, item.Author)
+		err := tx.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, item.Author)
 		if errors.Is(err, sql.ErrNoRows) {
 			mes := models.Message{}
 			mes.Message = "Can't find post author by nickname: " + item.Author
@@ -631,7 +607,7 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 
 		if item.Parent != 0 {
 			var parentExiste string
-			err = tx.Get(&parentExiste, `SELECT id FROM forum.post WHERE id = $1 and thread = $2`, item.Parent, item.Thread)
+			err = tx.Get(&parentExiste, `SELECT id FROM forum.post WHERE id = $1 and thread = $2 LIMIT 1`, item.Parent, item.Thread)
 
 			if err != nil {
 				mes := models.Message{}
@@ -684,9 +660,9 @@ func (h *Handlers) GetThread(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1`, thread)
+		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
 	} else {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1`, isId)
+		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
 	}
 
 	if errors.Is(err, sql.ErrNoRows) {
@@ -784,7 +760,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var contained string
-	err = h.db.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1`, vote.Nickname)
+	err = h.db.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, vote.Nickname)
 	if errors.Is(err, sql.ErrNoRows) {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + vote.Nickname
@@ -793,7 +769,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isId == -1 {
-		err = h.db.Get(&vote.Thread, `SELECT id as thread FROM forum.thread WHERE slug = $1`, thread)
+		err = h.db.Get(&vote.Thread, `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
 		if err != nil {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by slug: " + thread
@@ -805,7 +781,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var vot int
-	err = h.db.Get(&vot, `SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2`, vote.Thread, vote.Nickname)
+	err = h.db.Get(&vot, `SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1`, vote.Thread, vote.Nickname)
 	if errors.Is(err, sql.ErrNoRows) {
 		_, err = h.db.NamedExec(`INSERT INTO forum.vote(thread, nickname, voice) VALUES (:thread, :nickname, :voice)`, &vote)
 	} else {
@@ -823,9 +799,9 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1`, thread)
+		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
 	} else {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1`, isId)
+		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
 	}
 
 	httputils.Respond(w, http.StatusOK, result)
@@ -1052,31 +1028,37 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum.forum CASCADE;`)
+	_, err = tx.Exec(`TRUNCATE forum.forum CASCADE`)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum.post CASCADE;`)
+	_, err = tx.Exec(`TRUNCATE forum.post CASCADE`)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum.thread CASCADE;`)
+	_, err = tx.Exec(`TRUNCATE forum.thread CASCADE`)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum."user" CASCADE;`)
+	_, err = tx.Exec(`TRUNCATE forum."user" CASCADE`)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	//_, err = tx.Exec(`TRUNCATE votes CASCADE;`) // TODO add
+
+	_, err = tx.Exec(`TRUNCATE forum.vote CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
 
 	err = tx.Commit()
 	if err != nil {
@@ -1091,19 +1073,19 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) AllInfo(w http.ResponseWriter, r *http.Request) {
 	var status models.Status
 
-	err := h.db.QueryRow(`SELECT COUNT(*) FROM forum."user";`).Scan(&status.User)
+	err := h.db.QueryRow(`SELECT COUNT(*) FROM forum."user"`).Scan(&status.User)
 	if err != nil {
 		status.User = 0
 	}
-	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.forum;`).Scan(&status.Forum)
+	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.forum`).Scan(&status.Forum)
 	if err != nil {
 		status.Forum = 0
 	}
-	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.thread;`).Scan(&status.Thread)
+	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.thread`).Scan(&status.Thread)
 	if err != nil {
 		status.Thread = 0
 	}
-	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.post;`).Scan(&status.Post)
+	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.post`).Scan(&status.Post)
 	if err != nil {
 		status.Post = 0
 	}
