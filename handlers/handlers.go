@@ -1,9 +1,7 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
 	"net/http"
@@ -82,26 +80,19 @@ func (h *Handlers) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	user := models.User{}
 
-	row, err := h.conn.Query( `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
+	row, _ := h.conn.Query( `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
 
-	if errors.Is(err, sql.ErrNoRows) {
+	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + nickname
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
-	if err != nil {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
-		return
-	}
 
 	defer row.Close()
-	if !row.Next() {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
-		return
-	}
 
-	err = row.Scan(&user.Nickname, &user.Fullname, &user.About, &user.Email)
+
+	err := row.Scan(&user.Nickname, &user.Fullname, &user.About, &user.Email)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
@@ -127,15 +118,16 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, err := tx.Query( `SELECT id FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
-	row.Close()
-	if errors.Is(err, sql.ErrNoRows) {
+	row, _ := tx.Query( `SELECT id FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
+
+	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + nickname
 		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
+	row.Close()
 
 	err = tx.QueryRow(
 		`UPDATE forum."user" 
@@ -174,45 +166,76 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 // FORUM
 
 func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
-	//forum := models.Forum{}
-	//
-	//if err := json.NewDecoder(r.Body).Decode(&forum); err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//err := h.db.Get(&forum.User, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, forum.User)
-	//if errors.Is(err, sql.ErrNoRows) {
-	//	mes := models.Message{}
-	//	mes.Message = "Can't find user with nickname: " + forum.User
-	//	httputils.Respond(w, http.StatusNotFound, mes)
-	//	return
-	//}
-	//
-	//_, err = h.db.NamedExec(
-	//	`INSERT INTO forum.forum(title, "user", slug)
-	//		   VALUES (:title, :user, :slug)`,
-	//	&forum)
-	//
-	//if driverErr, ok := err.(pgx.PgError); ok {
-	//	if driverErr.Code == "23505" {
-	//		var result models.Forum
-	//		err := h.db.Get(&result, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, forum.Slug)
-	//		if err != nil {
-	//			httputils.Respond(w, http.StatusInternalServerError, nil)
-	//			return
-	//		}
-	//		httputils.Respond(w, http.StatusConflict, result)
-	//		return
-	//	}
-	//}
-	//
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//httputils.Respond(w, http.StatusCreated, forum)
+	forum := models.Forum{}
+
+	if err := json.NewDecoder(r.Body).Decode(&forum); err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	err = tx.QueryRow(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, forum.User).Scan(&forum.User)
+	if err != nil {
+		mes := models.Message{}
+		mes.Message = "Can't find user with nickname: " + forum.User
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO forum.forum(title, "user", slug)
+			   VALUES ($1, $2, $3)`,
+		&forum.Title, &forum.User, &forum.Slug)
+
+	if driverErr, ok := err.(pgx.PgError); ok {
+		if driverErr.Code == "23505" {
+			_ = tx.Rollback()
+			tx, err = h.conn.Begin()
+			if err != nil {
+				httputils.Respond(w, http.StatusInternalServerError, nil)
+				return
+			}
+
+			var result models.Forum
+			err = tx.QueryRow(`SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, forum.Slug).Scan(
+				&result.Title, &result.User, &result.Slug, &result.Posts, &result.Threads)
+			if err != nil {
+				_ = tx.Rollback()
+				httputils.Respond(w, http.StatusInternalServerError, nil)
+				return
+			}
+			err = tx.Commit()
+			if err != nil {
+				_ = tx.Rollback()
+				httputils.Respond(w, http.StatusInternalServerError, nil)
+				return
+			}
+
+			httputils.Respond(w, http.StatusConflict, result)
+			return
+		}
+	}
+
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	httputils.Respond(w, http.StatusCreated, forum)
 }
 
 func (h *Handlers) GetForum(w http.ResponseWriter, r *http.Request) {
@@ -1058,73 +1081,80 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 // SERVICE
 
 func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
-	//var err error
-	//tx, err := h.db.Beginx()
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//_, err = tx.Exec(`TRUNCATE forum.forum CASCADE`)
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//_, err = tx.Exec(`TRUNCATE forum.post CASCADE`)
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//_, err = tx.Exec(`TRUNCATE forum.thread CASCADE`)
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//_, err = tx.Exec(`TRUNCATE forum."user" CASCADE`)
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//_, err = tx.Exec(`TRUNCATE forum.vote CASCADE`)
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//err = tx.Commit()
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//httputils.Respond(w, http.StatusOK, nil)
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	_, err = tx.Exec(`TRUNCATE forum.forum CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+	_, err = tx.Exec(`TRUNCATE forum.post CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+	_, err = tx.Exec(`TRUNCATE forum.thread CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+	_, err = tx.Exec(`TRUNCATE forum."user" CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	_, err = tx.Exec(`TRUNCATE forum.vote CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, nil)
 }
 
 func (h *Handlers) AllInfo(w http.ResponseWriter, r *http.Request) {
-	//var status models.Status
-	//
-	//err := h.db.QueryRow(`SELECT COUNT(*) FROM forum."user"`).Scan(&status.User)
-	//if err != nil {
-	//	status.User = 0
-	//}
-	//err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.forum`).Scan(&status.Forum)
-	//if err != nil {
-	//	status.Forum = 0
-	//}
-	//err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.thread`).Scan(&status.Thread)
-	//if err != nil {
-	//	status.Thread = 0
-	//}
-	//err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.post`).Scan(&status.Post)
-	//if err != nil {
-	//	status.Post = 0
-	//}
-	//
-	//httputils.Respond(w, http.StatusOK, status)
+	var status models.Status
+
+	err := h.conn.QueryRow(`SELECT COUNT(*) FROM forum."user"`).Scan(&status.User)
+	if err != nil {
+		status.User = 0
+	}
+	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.forum`).Scan(&status.Forum)
+	if err != nil {
+		status.Forum = 0
+	}
+	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.thread`).Scan(&status.Thread)
+	if err != nil {
+		status.Thread = 0
+	}
+	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.post`).Scan(&status.Post)
+	if err != nil {
+		status.Post = 0
+	}
+
+	httputils.Respond(w, http.StatusOK, status)
 }
