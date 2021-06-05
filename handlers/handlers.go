@@ -1,14 +1,11 @@
 package handlers
 
 import (
-	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"github.com/go-openapi/strfmt"
 	"github.com/gorilla/mux"
 	"github.com/jackc/pgx"
-	"github.com/jmoiron/sqlx"
 	"net/http"
 	"server/httputils"
 	"server/models"
@@ -18,12 +15,12 @@ import (
 )
 
 type Handlers struct {
-	db *sqlx.DB
+	conn *pgx.ConnPool
 }
 
-func NewHandler(db *sqlx.DB) *Handlers {
+func NewHandler(conn *pgx.ConnPool) *Handlers {
 	return &Handlers{
-		db: db,
+		conn: conn,
 	}
 }
 
@@ -40,15 +37,36 @@ func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.db.NamedExec(`INSERT INTO forum."user"(nickname, fullname, about, email) VALUES (:nickname, :fullname, :about, :email)`, &user)
+	_, err := h.conn.Exec(`INSERT INTO forum."user"(nickname, fullname, about, email) VALUES ($1, $2, $3, $4)`,
+		user.Nickname,
+		user.Fullname,
+		user.About,
+		user.Email)
+
 	if driverErr, ok := err.(pgx.PgError); ok {
 		if driverErr.Code == "23505" {
-			var users []models.User
-			err = h.db.Select(&users, `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 OR email = $2 LIMIT 2`, &user.Nickname, &user.Email)
+			row, err := h.conn.Query(`SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 OR email = $2 LIMIT 2`, user.Nickname, user.Email)
 			if err != nil {
 				httputils.Respond(w, http.StatusInternalServerError, nil)
 				return
 			}
+			defer row.Close()
+			var users []models.User
+			for row.Next() {
+				user := models.User{}
+				err = row.Scan(
+					&user.Nickname,
+					&user.Fullname,
+					&user.About,
+					&user.Email)
+				if err != nil {
+					httputils.Respond(w, http.StatusInternalServerError, nil)
+					return
+				}
+
+				users = append(users, user)
+			}
+
 			httputils.Respond(w, http.StatusConflict, users)
 			return
 		}
@@ -67,15 +85,18 @@ func (h *Handlers) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	user := models.User{}
 
-	err := h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
+	row, _ := h.conn.Query(`SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
 
-	if errors.Is(err, sql.ErrNoRows) {
+	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + nickname
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
 
+	defer row.Close()
+
+	err := row.Scan(&user.Nickname, &user.Fullname, &user.About, &user.Email)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
@@ -95,16 +116,24 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var contained string
-	err := h.db.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
-	if errors.Is(err, sql.ErrNoRows) {
-		mes := models.Message{}
-		mes.Message = "Can't find user by nickname: " + nickname
-		httputils.Respond(w, http.StatusNotFound, mes)
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
-	err = h.db.QueryRowx(
+	row, _ := tx.Query(`SELECT id FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
+
+	if !row.Next() {
+		mes := models.Message{}
+		mes.Message = "Can't find user by nickname: " + nickname
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+	row.Close()
+
+	err = tx.QueryRow(
 		`UPDATE forum."user" 
 			   SET fullname = COALESCE(NULLIF($1, ''), fullname),
 			       about = COALESCE(NULLIF($2, ''), about),
@@ -120,15 +149,17 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 		&user.About,
 		&user.Email,
 	)
-	if driverErr, ok := err.(pgx.PgError); ok {
-		if driverErr.Code == "23505" {
-			mes := models.Message{}
-			mes.Message = "This email is already registered by user: " + nickname
-			httputils.Respond(w, http.StatusConflict, mes)
-			return
-		}
-	}
 	if err != nil {
+		mes := models.Message{}
+		mes.Message = "This email is already registered by user: " + nickname
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusConflict, mes)
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
@@ -146,37 +177,55 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.db.Get(&forum.User, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, forum.User)
-	if errors.Is(err, sql.ErrNoRows) {
-		mes := models.Message{}
-		mes.Message = "Can't find user with nickname: " + forum.User
-		httputils.Respond(w, http.StatusNotFound, mes)
-		return
-	}
-
-	_, err = h.db.NamedExec(
-		`INSERT INTO forum.forum(title, "user", slug) 
-			   VALUES (:title, :user, :slug)`,
-		&forum)
-
-	if driverErr, ok := err.(pgx.PgError); ok {
-		if driverErr.Code == "23505" {
-			var result models.Forum
-			err := h.db.Get(&result, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, forum.Slug)
-			if err != nil {
-				httputils.Respond(w, http.StatusInternalServerError, nil)
-				return
-			}
-			httputils.Respond(w, http.StatusConflict, result)
-			return
-		}
-	}
-
+	tx, err := h.conn.Begin()
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
+	err = tx.QueryRow(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, forum.User).Scan(&forum.User)
+	if err != nil {
+		mes := models.Message{}
+		mes.Message = "Can't find user with nickname: " + forum.User
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	_, err = tx.Exec(
+		`INSERT INTO forum.forum(title, "user", slug)
+			   VALUES ($1, $2, $3)`,
+		&forum.Title, &forum.User, &forum.Slug)
+
+	if err != nil {
+		_ = tx.Rollback()
+		tx, err = h.conn.Begin()
+		if err != nil {
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		var result models.Forum
+		err = tx.QueryRow(`SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, forum.Slug).Scan(
+			&result.Title, &result.User, &result.Slug, &result.Posts, &result.Threads)
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+		err = tx.Commit()
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		httputils.Respond(w, http.StatusConflict, result)
+		return
+
+	}
+
+	err = tx.Commit()
 	httputils.Respond(w, http.StatusCreated, forum)
 }
 
@@ -186,16 +235,12 @@ func (h *Handlers) GetForum(w http.ResponseWriter, r *http.Request) {
 
 	forum := models.Forum{}
 
-	err := h.db.Get(&forum, `SELECT slug, title, "user", posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, slug)
-	if errors.Is(err, sql.ErrNoRows) {
+	err := h.conn.QueryRow(`SELECT slug, title, "user", posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, slug).Scan(
+		&forum.Slug, &forum.Title, &forum.User, &forum.Posts, &forum.Threads)
+	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find forum with slug: " + slug
 		httputils.Respond(w, http.StatusNotFound, mes)
-		return
-	}
-
-	if err != nil {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -213,28 +258,35 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := h.db.Get(&thread.Author, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, thread.Author)
-	if errors.Is(err, sql.ErrNoRows) {
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	err = tx.QueryRow(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, thread.Author).Scan(&thread.Author)
+	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find thread author by nickname: " + thread.Author
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
 
-	err = h.db.Get(&thread.Forum, `SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
-	if errors.Is(err, sql.ErrNoRows) {
+	err = tx.QueryRow(`SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum).Scan(&thread.Forum)
+	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find thread forum by slug: " + thread.Forum
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
-
 	if thread.Created.String() == "" {
 		thread.Created = time.Now()
 	}
 
-	err = h.db.QueryRowx(`
-		INSERT INTO forum.thread(title, author, forum, message, votes, slug, created) 
+	err = tx.QueryRow(`
+		INSERT INTO forum.thread(title, author, forum, message, votes, slug, created)
 		VALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7)
 		RETURNING id`,
 		thread.Title,
@@ -243,28 +295,50 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		thread.Message,
 		thread.Votes,
 		thread.Slug,
-		thread.Created).Scan(
-		&thread.Id,
-	)
-
-	if driverErr, ok := err.(pgx.PgError); ok {
-		if driverErr.Code == "23505" {
-			var result models.Thread
-			err := h.db.Get(&result, `
-		SELECT id, title, author, forum, message, votes, slug, created 
-		FROM forum.thread 
-		WHERE slug = $1 LIMIT 1`,
-				thread.Slug)
-			if err != nil {
-				httputils.Respond(w, http.StatusInternalServerError, nil)
-				return
-			}
-			httputils.Respond(w, http.StatusConflict, result)
-			return
-		}
-	}
+		thread.Created).Scan(&thread.Id)
 
 	if err != nil {
+		_ = tx.Rollback()
+		tx, err = h.conn.Begin()
+		if err != nil {
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		var result models.Thread
+		err := tx.QueryRow(`
+					SELECT id, title, author, forum, message, votes, slug, created
+					FROM forum.thread
+					WHERE slug = $1 LIMIT 1`,
+			thread.Slug).Scan(
+			&result.Id,
+			&result.Title,
+			&result.Author,
+			&result.Forum,
+			&result.Message,
+			&result.Votes,
+			&result.Slug,
+			&result.Created)
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		err = tx.Commit()
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		httputils.Respond(w, http.StatusConflict, result)
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
@@ -276,14 +350,22 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	forum := params["slug"]
 
-	var id int
-	err := h.db.Get(&id, `SELECT id FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
-	if errors.Is(err, sql.ErrNoRows) {
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	row, _ := tx.Query(`SELECT id FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
+	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find forum by slug: " + forum
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
+
+	row.Close()
 
 	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -299,38 +381,38 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	var users []models.User
 	if since == "" {
 		if desc {
-			err = h.db.Select(&users,
-				  `select nickname, fullname, about, email 
+			row, err = tx.Query(
+				`select nickname, fullname, about, email
 						from forum.forum_users
 						WHERE forum = $1
-						order by nickname desc 
+						order by nickname desc
 					limit $2`,
 				&forum,
 				&limit)
 		} else {
-			err = h.db.Select(&users,
-				`select nickname, fullname, about, email 
+			row, err = tx.Query(
+				`select nickname, fullname, about, email
 						from forum.forum_users
 						WHERE forum = $1
-						order by nickname 
+						order by nickname
 					limit $2`,
 				&forum,
 				&limit)
 		}
 	} else {
 		if desc {
-			err = h.db.Select(&users,
-				`select nickname, fullname, about, email 
+			row, err = tx.Query(
+				`select nickname, fullname, about, email
 						from forum.forum_users
 						WHERE forum = $1 and nickname < $3
-						order by nickname desc 
+						order by nickname desc
 					limit $2`,
 				&forum,
 				&limit,
 				&since)
 		} else {
-			err = h.db.Select(&users,
-				`select nickname, fullname, about, email 
+			row, err = tx.Query(
+				`select nickname, fullname, about, email
 						from forum.forum_users
 						WHERE forum = $1 and nickname > $3
 						order by nickname
@@ -342,13 +424,37 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
+	for row.Next() {
+		u := models.User{}
+		err = row.Scan(
+			&u.Nickname,
+			&u.Fullname,
+			&u.About,
+			&u.Email,
+		)
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+		users = append(users, u)
+	}
+
 	if users == nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusOK, []models.User{})
 	} else {
+		err = tx.Commit()
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
 		httputils.Respond(w, http.StatusOK, users)
 	}
 }
@@ -357,14 +463,22 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	params := mux.Vars(r)
 	forum := params["slug"]
 
-	var contained string
-	err := h.db.Get(&contained, `SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
-	if errors.Is(err, sql.ErrNoRows) {
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	row, _ := tx.Query(`SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
+	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find forum by slug: " + forum
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
+
+	row.Close()
 
 	limit, err := strconv.Atoi(r.URL.Query().Get("limit"))
 	if err != nil {
@@ -380,41 +494,41 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	var threads []models.Thread
 	if since == "" {
 		if desc {
-			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
-						from forum.thread t 
+			row, err = tx.Query(`
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
+						from forum.thread t
 						where t.forum = $1
-						order by t.created desc 
+						order by t.created desc
 						limit $2`,
 				&forum,
 				&limit)
 		} else {
-			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
-						from forum.thread t 
+			row, err = tx.Query(`
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
+						from forum.thread t
 						where t.forum = $1
-						order by t.created 
+						order by t.created
 						limit $2`,
 				&forum,
 				&limit)
 		}
 	} else {
 		if desc {
-			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
-						from forum.thread t 
-						where t.forum = $1 and t.created <= $3 
-						order by t.created desc 
+			row, err = tx.Query(`
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
+						from forum.thread t
+						where t.forum = $1 and t.created <= $3
+						order by t.created desc
 						limit $2`,
 				&forum,
 				&limit,
 				&since)
 		} else {
-			err = h.db.Select(&threads, `
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created 
-						from forum.thread t 
-						where t.forum = $1 and t.created >= $3 
-						order by t.created 
+			row, err = tx.Query(`
+						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
+						from forum.thread t
+						where t.forum = $1 and t.created >= $3
+						order by t.created
 						limit $2`,
 				&forum,
 				&limit,
@@ -423,13 +537,42 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
+	for row.Next() {
+		t := models.Thread{}
+		err = row.Scan(
+			&t.Id,
+			&t.Title,
+			&t.Author,
+			&t.Forum,
+			&t.Message,
+			&t.Votes,
+			&t.Slug,
+			&t.Created)
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+		threads = append(threads, t)
+	}
+
+	row.Close()
+
 	if threads != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusOK, threads)
 	} else {
+		err = tx.Commit()
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
 		httputils.Respond(w, http.StatusOK, []models.Thread{})
 	}
 }
@@ -450,11 +593,19 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 		User   *models.User   `json:"author,omitempty"`
 	}
 
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
 	var p models.Post
-	err := h.db.Get(&p, `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1`, post)
+	err = tx.QueryRow( `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1`, post).Scan(
+		&p.Id, &p.Parent, &p.Author, &p.Message, &p.IsEdited, &p.Forum, &p.Thread, &p.Created)
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find post with id: " + post
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
@@ -467,21 +618,32 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 
 	for _, item := range related {
 		if item == "user" {
-			err = h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1 LIMIT 1`, result.Post.Author)
+			err = tx.QueryRow( `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1 LIMIT 1`, result.Post.Author).Scan(
+				&user.Nickname, &user.Fullname, &user.About, &user.Email)
 			result.User = &user
 		}
 		if item == "forum" {
-			err = h.db.Get(&forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, result.Post.Forum)
+			err = tx.QueryRow( `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, result.Post.Forum).Scan(
+				&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 			result.Forum = &forum
 		}
 		if item == "thread" {
-			err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, result.Post.Thread)
+			err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, result.Post.Thread).Scan(
+				&thread.Id, &thread.Title, &thread.Author, &thread.Forum, &thread.Message, &thread.Votes, &thread.Slug, &thread.Created)
 			result.Thread = &thread
 		}
 		if err != nil {
+			_ = tx.Rollback()
 			httputils.Respond(w, http.StatusInternalServerError, nil)
 			return
 		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
 	}
 
 	httputils.Respond(w, http.StatusOK, result)
@@ -502,16 +664,16 @@ func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	tx, err := h.db.Beginx()
+	tx, err := h.conn.Begin()
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
-	err = tx.QueryRowx(`
-				UPDATE forum.post 
+	err = tx.QueryRow(`
+				UPDATE forum.post
 				SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
-				WHERE id = $2 
+				WHERE id = $2
 				RETURNING id, parent, author, message, isEdited, forum, thread, created `,
 		post.Message,
 		post.Id).Scan(
@@ -564,39 +726,46 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 	var mes models.Message
 
 	var info models.Thread
+
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
 	if isId == -1 {
-		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
-		if errors.Is(err, sql.ErrNoRows) {
+		err = tx.QueryRow(`SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(&info.Id, &info.Forum)
+		if err != nil {
 			mes.Message = "Can't find post thread by slug: " + thread
 		}
 	} else {
-		err = h.db.Get(&info, `SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
-		if errors.Is(err, sql.ErrNoRows) {
+		err = tx.QueryRow(`SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(&info.Id, &info.Forum)
+		if err != nil {
 			mes.Message = "Can't find post thread by id: " + strconv.Itoa(isId)
 		}
 	}
 
-	if errors.Is(err, sql.ErrNoRows) {
+	if err != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
 
 	if len(posts) == 0 {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusCreated, posts)
 		return
 	}
 
-	tx, _ := h.db.Beginx()
 	create := strfmt.DateTime(time.Now())
 
 	var values string
 	var args []interface{}
-	len := len(posts) - 1
+	l := len(posts) - 1
 
 	for i, item := range posts {
-		var contained string
-		err := tx.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, item.Author)
-		if errors.Is(err, sql.ErrNoRows) {
+		row, _ := tx.Query(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, item.Author)
+		if !row.Next() {
 			mes := models.Message{}
 			mes.Message = "Can't find post author by nickname: " + item.Author
 			httputils.Respond(w, http.StatusNotFound, mes)
@@ -604,11 +773,13 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
+		row.Close()
+
 		item.Thread = info.Id
 
 		if item.Parent != 0 {
-			var parentExiste string
-			err = tx.Get(&parentExiste, `SELECT id FROM forum.post WHERE id = $1 and thread = $2 LIMIT 1`, item.Parent, item.Thread)
+			var parentExiste int
+			err = tx.QueryRow(`SELECT id FROM forum.post WHERE id = $1 and thread = $2 LIMIT 1`, item.Parent, item.Thread).Scan(&parentExiste)
 
 			if err != nil {
 				mes := models.Message{}
@@ -624,14 +795,14 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		values += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
 			i*6+1, i*6+2, i*6+3, i*6+4, i*6+5, i*6+6)
 		args = append(args, item.Parent, item.Author, item.Message, item.Forum, item.Thread, create)
-		if i != len {
+		if i != l {
 			values += ","
 		}
 	}
 
 	query := "INSERT INTO forum.post(parent, author, message, forum, thread, created) VALUES " + values + " RETURNING id, parent, author, message, isEdited, forum, thread, created"
 	posts = []models.Post{}
-	err = tx.Select(&posts, query, args...)
+	row, err := tx.Query(query, args...)
 
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
@@ -639,10 +810,30 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	for row.Next() {
+		p := models.Post{}
+		err = row.Scan(
+			&p.Id,
+			&p.Parent,
+			&p.Author,
+			&p.Message,
+			&p.IsEdited,
+			&p.Forum,
+			&p.Thread,
+			&p.Created)
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		posts = append(posts, p)
+	}
+
 	err = tx.Commit()
 	if err != nil {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
@@ -660,10 +851,10 @@ func (h *Handlers) GetThread(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = h.db.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+		err = h.conn.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	} else {
-		err = h.db.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
+		err = h.conn.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	}
 
@@ -693,14 +884,14 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var mes models.Message
-	tx, err := h.db.Beginx()
+	tx, err := h.conn.Begin()
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
 	if isId == -1 {
-		err = tx.QueryRowx(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *`,
+		err = tx.QueryRow(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *`,
 			result.Title,
 			result.Message,
 			result.Slug).Scan(
@@ -714,7 +905,7 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 			&result.Created)
 		mes.Message = "Can't find thread by slug: " + thread
 	} else {
-		err = tx.QueryRowx(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *`,
+		err = tx.QueryRow(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *`,
 			result.Title,
 			result.Message,
 			result.Id).Scan(
@@ -761,20 +952,29 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var contained string
-	err = h.db.Get(&contained, `SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, vote.Nickname)
-	if errors.Is(err, sql.ErrNoRows) {
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	row, _ := tx.Query(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, vote.Nickname)
+	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + vote.Nickname
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
 
+	row.Close()
+
 	if isId == -1 {
-		err = h.db.Get(&vote.Thread, `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
+		err = tx.QueryRow( `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(&vote.Thread)
 		if err != nil {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by slug: " + thread
+			_ = tx.Rollback()
 			httputils.Respond(w, http.StatusNotFound, mes)
 			return
 		}
@@ -783,27 +983,38 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var vot int
-	err = h.db.Get(&vot, `SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1`, vote.Thread, vote.Nickname)
-	if errors.Is(err, sql.ErrNoRows) {
-		_, err = h.db.NamedExec(`INSERT INTO forum.vote(thread, nickname, voice) VALUES (:thread, :nickname, :voice)`, &vote)
+	err = tx.QueryRow( `SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1`, vote.Thread, vote.Nickname).Scan(&vot)
+	if err != nil {
+		_, err = tx.Exec(`INSERT INTO forum.vote(thread, nickname, voice) VALUES ($1, $2, $3)`, &vote.Thread, &vote.Nickname, &vote.Voice)
 	} else {
 		if vot != vote.Voice {
-			_, err = h.db.NamedExec(`UPDATE forum.vote SET voice = :voice WHERE thread = :thread and nickname = :nickname`, &vote)
+			_, err = tx.Exec(`UPDATE forum.vote SET voice = $3 WHERE thread = $1 and nickname = $2`, &vote.Thread, &vote.Nickname, &vote.Voice)
 		}
 	}
 
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find thread by id: " + thread
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusNotFound, mes)
 		return
 	}
 
 	var result models.Thread
 	if isId == -1 {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
+		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	} else {
-		err = h.db.Get(&result, `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
+		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
+			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
+	}
+
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
 	}
 
 	httputils.Respond(w, http.StatusOK, result)
@@ -835,71 +1046,73 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 		desc = false
 	}
 
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
 	var id int
 	if isId != -1 {
 		id = isId
-		rows, err := h.db.Query(`SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1`, isId)
+		err := tx.QueryRow(`SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(&id)
 		if err != nil {
-			httputils.Respond(w, http.StatusInternalServerError, nil)
-			return
-		}
-
-		if !rows.Next() {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by id: " + thread
+			_ = tx.Rollback()
 			httputils.Respond(w, http.StatusNotFound, mes)
 			return
 		}
-
-		_ = rows.Close()
 	} else {
-		err = h.db.Get(&id, `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread)
+		err = tx.QueryRow( `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(&id)
 		if err != nil {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by slug: " + thread
+			_ = tx.Rollback()
 			httputils.Respond(w, http.StatusNotFound, mes)
 			return
 		}
 	}
 
 	var posts []models.Post
+	var row *pgx.Rows
 
 	// Float
 	switch sort {
 	case "tree":
 		if since == 0 {
 			if desc {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
-							WHERE thread = $1 
-							ORDER BY path DESC, id DESC 
+							WHERE thread = $1
+							ORDER BY path DESC, id DESC
 							LIMIT $2`,
 							id, limit)
 			} else {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
-							WHERE thread = $1 
-							ORDER BY path, id 
+							WHERE thread = $1
+							ORDER BY path, id
 							LIMIT $2`,
 					id, limit)
 			}
 		} else {
 			if desc {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
 							WHERE thread = $1 and path < (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)
-							ORDER BY path DESC, id DESC 
+							ORDER BY path DESC, id DESC
 							LIMIT $2`,
 					id, limit, since)
 			} else {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
 							WHERE thread = $1 and path > (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)
-							ORDER BY path, id 
+							ORDER BY path, id
 							LIMIT $2`,
 					id, limit, since)
 			}
@@ -907,24 +1120,24 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 	case "parent_tree":
 		if since == 0 {
 			if desc {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
 							WHERE path[1] IN (
-								SELECT id 
-								FROM forum.post 
+								SELECT id
+								FROM forum.post
 								WHERE thread = $1 and parent = 0
-								ORDER BY id DESC 
+								ORDER BY id DESC
 								LIMIT $2)
 							ORDER BY path[1] DESC, path, id`,
 							id, limit)
 			} else {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
 							WHERE path[1] IN (
-								SELECT id 
-								FROM forum.post 
+								SELECT id
+								FROM forum.post
 								WHERE thread = $1 AND parent = 0
 								ORDER BY id
 								LIMIT $2)
@@ -933,24 +1146,24 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if desc {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
 							WHERE path[1] IN (
-								SELECT id 
-								FROM forum.post 
+								SELECT id
+								FROM forum.post
 								WHERE thread = $1 AND parent = 0 and path[1] < (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)
-								ORDER BY id DESC 
+								ORDER BY id DESC
 								LIMIT $2)
 							ORDER BY path[1] DESC, path, id`,
 							id, limit, since)
 			} else {
-				err = h.db.Select(&posts,
-					`SELECT id, author, created, forum, isEdited, message, parent, thread 
+				row, err = tx.Query(
+					`SELECT id, author, created, forum, isEdited, message, parent, thread
 							FROM forum.post
 							WHERE path[1] in (
-								SELECT id 
-								FROM forum.post 
+								SELECT id
+								FROM forum.post
 								WHERE thread = $1 AND parent = 0 and path[1] > (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)
 								ORDER BY id ASC
 								LIMIT $2)
@@ -961,7 +1174,7 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 	default:
 		if since == 0 {
 			if desc {
-				err = h.db.Select(&posts,
+				row, err = tx.Query(
 					`SELECT id, author, created, forum, isEdited, message, parent, thread
 					   FROM forum.post
 					   WHERE thread = $1
@@ -971,7 +1184,7 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 					limit,
 				)
 			} else {
-				err = h.db.Select(&posts,
+				row, err = tx.Query(
 					`SELECT id, author, created, forum, isEdited, message, parent, thread
 					   FROM forum.post
 					   WHERE thread = $1
@@ -983,7 +1196,7 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			if desc {
-				err = h.db.Select(&posts,
+				row, err = tx.Query(
 					`SELECT id, author, created, forum, isEdited, message, parent, thread
 					   FROM forum.post
 					   WHERE thread = $1 and id < $3
@@ -994,7 +1207,7 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 					since,
 				)
 			} else {
-				err = h.db.Select(&posts,
+				row, err = tx.Query(
 					`SELECT id, author, created, forum, isEdited, message, parent, thread
 					   FROM forum.post
 					   WHERE thread = $1 and id > $3
@@ -1009,27 +1222,56 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
+	for row.Next() {
+		p := models.Post{}
+		err = row.Scan(
+			&p.Id,
+			&p.Author,
+			&p.Created,
+			&p.Forum,
+			&p.IsEdited,
+			&p.Message,
+			&p.Parent,
+			&p.Thread)
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		posts = append(posts, p)
+	}
+
 	if posts == nil {
+		_ = tx.Rollback()
 		httputils.Respond(w, http.StatusOK, []models.Post{})
 		return
 	}
-	httputils.Respond(w, http.StatusOK, posts)
 
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, posts)
 }
 
 // SERVICE
 
 func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
-	var err error
-	tx, err := h.db.Beginx()
+	tx, err := h.conn.Begin()
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
+
 	_, err = tx.Exec(`TRUNCATE forum.forum CASCADE`)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
@@ -1062,6 +1304,13 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	_, err = tx.Exec(`TRUNCATE forum.forum_users CASCADE`)
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
 	err = tx.Commit()
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
@@ -1075,19 +1324,19 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) AllInfo(w http.ResponseWriter, r *http.Request) {
 	var status models.Status
 
-	err := h.db.QueryRow(`SELECT COUNT(*) FROM forum."user"`).Scan(&status.User)
+	err := h.conn.QueryRow(`SELECT COUNT(*) FROM forum."user"`).Scan(&status.User)
 	if err != nil {
 		status.User = 0
 	}
-	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.forum`).Scan(&status.Forum)
+	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.forum`).Scan(&status.Forum)
 	if err != nil {
 		status.Forum = 0
 	}
-	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.thread`).Scan(&status.Thread)
+	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.thread`).Scan(&status.Thread)
 	if err != nil {
 		status.Thread = 0
 	}
-	err = h.db.QueryRow(`SELECT COUNT(*) FROM forum.post`).Scan(&status.Post)
+	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.post`).Scan(&status.Post)
 	if err != nil {
 		status.Post = 0
 	}

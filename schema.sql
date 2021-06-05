@@ -191,5 +191,3 @@ CREATE UNLOGGED TABLE forum.forum_users
         REFERENCES forum.user (nickname),
     PRIMARY KEY (nickname, forum)
 );
-
-SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = 15002 LIMIT 1
