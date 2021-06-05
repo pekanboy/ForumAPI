@@ -24,6 +24,10 @@ func NewHandler(conn *pgx.ConnPool) *Handlers {
 	}
 }
 
+//func (h *Handlers) Prepare() {
+//	_, err = h.conn.Prepare("insertPost", )
+//}
+
 // USER
 
 func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -800,7 +804,6 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		row.Close()
 
 		item.Thread = info.Id
-
 		item.Forum = info.Forum
 
 		values += fmt.Sprintf("($%d, $%d, $%d, $%d, $%d, $%d)",
@@ -980,8 +983,11 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 
 	row.Close()
 
+
+	var result models.Thread
 	if isId == -1 {
-		err = tx.QueryRow( `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(&vote.Thread)
+		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 		if err != nil {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by slug: " + thread
@@ -990,8 +996,18 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		vote.Thread = isId
+		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
+			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
+		if err != nil {
+			mes := models.Message{}
+			mes.Message = "Can't find thread by id: " + thread
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusNotFound, mes)
+			return
+		}
 	}
+
+	vote.Thread = result.Id
 
 	var vot int
 	err = tx.QueryRow( `SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1`, vote.Thread, vote.Nickname).Scan(&vot)
@@ -1004,22 +1020,12 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
-		mes := models.Message{}
-		mes.Message = "Can't find thread by id: " + thread
 		_ = tx.Rollback()
-		httputils.Respond(w, http.StatusNotFound, mes)
+		httputils.Respond(w, http.StatusInternalServerError, nil)
 		return
 	}
 
-	var result models.Thread
-	if isId == -1 {
-		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
-			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
-	} else {
-		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
-			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
-	}
-
+	result.Votes = result.Votes - vot + vote.Voice
 
 	err = tx.Commit()
 	if err != nil {
