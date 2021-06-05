@@ -10,6 +10,7 @@ import (
 	"server/httputils"
 	"server/models"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -579,110 +580,129 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 // POST
 
 func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
-	//params := mux.Vars(r)
-	//post := params["id"]
-	//
-	//var related []string
-	//related = strings.Split(r.URL.Query().Get("related"), ",")
-	//
-	//var result struct {
-	//	Post   *models.Post   `json:"post,omitempty"`
-	//	Thread *models.Thread `json:"thread,omitempty"`
-	//	Forum  *models.Forum  `json:"forum,omitempty"`
-	//	User   *models.User   `json:"author,omitempty"`
-	//}
-	//
-	//var p models.Post
-	//err := h.db.Get(&p, `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1`, post)
-	//if err != nil {
-	//	mes := models.Message{}
-	//	mes.Message = "Can't find post with id: " + post
-	//	httputils.Respond(w, http.StatusNotFound, mes)
-	//	return
-	//}
-	//
-	//result.Post = &p
-	//
-	//var user models.User
-	//var forum models.Forum
-	//var thread models.Thread
-	//
-	//for _, item := range related {
-	//	if item == "user" {
-	//		err = h.db.Get(&user, `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1 LIMIT 1`, result.Post.Author)
-	//		result.User = &user
-	//	}
-	//	if item == "forum" {
-	//		err = h.db.Get(&forum, `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, result.Post.Forum)
-	//		result.Forum = &forum
-	//	}
-	//	if item == "thread" {
-	//		err = h.db.Get(&thread, `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, result.Post.Thread)
-	//		result.Thread = &thread
-	//	}
-	//	if err != nil {
-	//		httputils.Respond(w, http.StatusInternalServerError, nil)
-	//		return
-	//	}
-	//}
-	//
-	//httputils.Respond(w, http.StatusOK, result)
+	params := mux.Vars(r)
+	post := params["id"]
+
+	var related []string
+	related = strings.Split(r.URL.Query().Get("related"), ",")
+
+	var result struct {
+		Post   *models.Post   `json:"post,omitempty"`
+		Thread *models.Thread `json:"thread,omitempty"`
+		Forum  *models.Forum  `json:"forum,omitempty"`
+		User   *models.User   `json:"author,omitempty"`
+	}
+
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	var p models.Post
+	err = tx.QueryRow( `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1`, post).Scan(
+		&p.Id, &p.Parent, &p.Author, &p.Message, &p.IsEdited, &p.Forum, &p.Thread, &p.Created)
+	if err != nil {
+		mes := models.Message{}
+		mes.Message = "Can't find post with id: " + post
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusNotFound, mes)
+		return
+	}
+
+	result.Post = &p
+
+	var user models.User
+	var forum models.Forum
+	var thread models.Thread
+
+	for _, item := range related {
+		if item == "user" {
+			err = tx.QueryRow( `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1 LIMIT 1`, result.Post.Author).Scan(
+				&user.Nickname, &user.Fullname, &user.About, &user.Email)
+			result.User = &user
+		}
+		if item == "forum" {
+			err = tx.QueryRow( `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, result.Post.Forum).Scan(
+				&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
+			result.Forum = &forum
+		}
+		if item == "thread" {
+			err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, result.Post.Thread).Scan(
+				&thread.Id, &thread.Title, &thread.Author, &thread.Forum, &thread.Message, &thread.Votes, &thread.Slug, &thread.Created)
+			result.Thread = &thread
+		}
+		if err != nil {
+			_ = tx.Rollback()
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		_ = tx.Rollback()
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, result)
 }
 
 func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
-	//params := mux.Vars(r)
-	//id, err := strconv.Atoi(params["id"])
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//post := models.Post{Id: id}
-	//
-	//if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//tx, err := h.db.Beginx()
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//err = tx.QueryRowx(`
-	//			UPDATE forum.post
-	//			SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
-	//			WHERE id = $2
-	//			RETURNING id, parent, author, message, isEdited, forum, thread, created `,
-	//	post.Message,
-	//	post.Id).Scan(
-	//	&post.Id,
-	//	&post.Parent,
-	//	&post.Author,
-	//	&post.Message,
-	//	&post.IsEdited,
-	//	&post.Forum,
-	//	&post.Thread,
-	//	&post.Created,
-	//)
-	//
-	//if err != nil {
-	//	mes := models.Message{}
-	//	mes.Message = "Can't find post with id: " + strconv.Itoa(id)
-	//	httputils.Respond(w, http.StatusNotFound, mes)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//err = tx.Commit()
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//httputils.Respond(w, http.StatusOK, post)
+	params := mux.Vars(r)
+	id, err := strconv.Atoi(params["id"])
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	post := models.Post{Id: id}
+
+	if err := json.NewDecoder(r.Body).Decode(&post); err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	err = tx.QueryRow(`
+				UPDATE forum.post
+				SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
+				WHERE id = $2
+				RETURNING id, parent, author, message, isEdited, forum, thread, created `,
+		post.Message,
+		post.Id).Scan(
+		&post.Id,
+		&post.Parent,
+		&post.Author,
+		&post.Message,
+		&post.IsEdited,
+		&post.Forum,
+		&post.Thread,
+		&post.Created,
+	)
+
+	if err != nil {
+		mes := models.Message{}
+		mes.Message = "Can't find post with id: " + strconv.Itoa(id)
+		httputils.Respond(w, http.StatusNotFound, mes)
+		_ = tx.Rollback()
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, post)
 }
 
 // THREAD
@@ -849,71 +869,71 @@ func (h *Handlers) GetThread(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
-	//params := mux.Vars(r)
-	//thread := params["slug_or_id"]
-	//
-	//isId, err := strconv.Atoi(thread)
-	//if err != nil {
-	//	isId = -1
-	//}
-	//
-	//result := models.Thread{Slug: thread, Id: isId}
-	//if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//var mes models.Message
-	//tx, err := h.db.Beginx()
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	return
-	//}
-	//
-	//if isId == -1 {
-	//	err = tx.QueryRowx(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *`,
-	//		result.Title,
-	//		result.Message,
-	//		result.Slug).Scan(
-	//		&result.Id,
-	//		&result.Title,
-	//		&result.Author,
-	//		&result.Forum,
-	//		&result.Message,
-	//		&result.Votes,
-	//		&result.Slug,
-	//		&result.Created)
-	//	mes.Message = "Can't find thread by slug: " + thread
-	//} else {
-	//	err = tx.QueryRowx(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *`,
-	//		result.Title,
-	//		result.Message,
-	//		result.Id).Scan(
-	//		&result.Id,
-	//		&result.Title,
-	//		&result.Author,
-	//		&result.Forum,
-	//		&result.Message,
-	//		&result.Votes,
-	//		&result.Slug,
-	//		&result.Created)
-	//	mes.Message = "Can't find forum by id: " + thread
-	//}
-	//
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusNotFound, mes)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//err = tx.Commit()
-	//if err != nil {
-	//	httputils.Respond(w, http.StatusInternalServerError, nil)
-	//	_ = tx.Rollback()
-	//	return
-	//}
-	//
-	//httputils.Respond(w, http.StatusOK, result)
+	params := mux.Vars(r)
+	thread := params["slug_or_id"]
+
+	isId, err := strconv.Atoi(thread)
+	if err != nil {
+		isId = -1
+	}
+
+	result := models.Thread{Slug: thread, Id: isId}
+	if err := json.NewDecoder(r.Body).Decode(&result); err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	var mes models.Message
+	tx, err := h.conn.Begin()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		return
+	}
+
+	if isId == -1 {
+		err = tx.QueryRow(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *`,
+			result.Title,
+			result.Message,
+			result.Slug).Scan(
+			&result.Id,
+			&result.Title,
+			&result.Author,
+			&result.Forum,
+			&result.Message,
+			&result.Votes,
+			&result.Slug,
+			&result.Created)
+		mes.Message = "Can't find thread by slug: " + thread
+	} else {
+		err = tx.QueryRow(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *`,
+			result.Title,
+			result.Message,
+			result.Id).Scan(
+			&result.Id,
+			&result.Title,
+			&result.Author,
+			&result.Forum,
+			&result.Message,
+			&result.Votes,
+			&result.Slug,
+			&result.Created)
+		mes.Message = "Can't find forum by id: " + thread
+	}
+
+	if err != nil {
+		httputils.Respond(w, http.StatusNotFound, mes)
+		_ = tx.Rollback()
+		return
+	}
+
+	err = tx.Commit()
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	httputils.Respond(w, http.StatusOK, result)
 }
 
 func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
