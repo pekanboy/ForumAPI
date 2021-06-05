@@ -1304,7 +1304,7 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = tx.Commit()
+	_, err = tx.Exec(`TRUNCATE forum.forum_users CASCADE`)
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
