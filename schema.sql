@@ -152,14 +152,15 @@ EXECUTE PROCEDURE forum.forum_posts_inc();
 
 CREATE UNLOGGED TABLE forum.vote
 (
-    id       BIGSERIAL PRIMARY KEY,
+    id       BIGSERIAL NOT NULL,
     thread   bigint NOT NULL,
     nickname citext NOT NULL,
     voice    BIGINT NOT NULL,
     FOREIGN KEY (thread)
         REFERENCES forum.thread (id),
     FOREIGN KEY (nickname)
-        REFERENCES forum.user (nickname)
+        REFERENCES forum.user (nickname),
+    PRIMARY KEY (thread, nickname)
 );
 
 DROP TRIGGER IF EXISTS forum_vote ON forum.vote;

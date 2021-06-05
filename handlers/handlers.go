@@ -24,9 +24,11 @@ func NewHandler(conn *pgx.ConnPool) *Handlers {
 	}
 }
 
-//func (h *Handlers) Prepare() {
-//	_, err = h.conn.Prepare("insertPost", )
-//}
+func (h *Handlers) Prepare() {
+	_, _ = h.conn.Prepare("insertVote", "INSERT INTO forum.vote(thread, nickname, voice) VALUES ($1, $2, $3)")
+	_, _ = h.conn.Prepare("updateVote", "UPDATE forum.vote SET voice = $3 WHERE thread = $1 and nickname = $2")
+	_, _ = h.conn.Prepare("selectVote", "SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1")
+}
 
 // USER
 
@@ -1010,12 +1012,17 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	vote.Thread = result.Id
 
 	var vot int
-	err = tx.QueryRow( `SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1`, vote.Thread, vote.Nickname).Scan(&vot)
+	_, err = tx.Exec("insertVote", vote.Thread, vote.Nickname, vote.Voice)
 	if err != nil {
-		_, err = tx.Exec(`INSERT INTO forum.vote(thread, nickname, voice) VALUES ($1, $2, $3)`, &vote.Thread, &vote.Nickname, &vote.Voice)
-	} else {
+		tx, err = h.conn.Begin()
+		if err != nil {
+			httputils.Respond(w, http.StatusInternalServerError, nil)
+			return
+		}
+
+		err = tx.QueryRow( "selectVote", vote.Thread, vote.Nickname).Scan(&vot)
 		if vot != vote.Voice {
-			_, err = tx.Exec(`UPDATE forum.vote SET voice = $3 WHERE thread = $1 and nickname = $2`, &vote.Thread, &vote.Nickname, &vote.Voice)
+			_, err = tx.Exec("updateVote", vote.Thread, vote.Nickname, vote.Voice)
 		}
 	}
 

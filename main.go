@@ -19,6 +19,8 @@ func main() {
 
 	handler := handlers.NewHandler(postgres.GetPostgres())
 
+	handler.Prepare()
+
 	user := router.PathPrefix("/api/user").Subrouter()
 	user.HandleFunc("/{nickname}/create", handler.CreateUser).Methods(http.MethodPost)
 	user.HandleFunc("/{nickname}/profile", handler.GetUser).Methods(http.MethodGet)
