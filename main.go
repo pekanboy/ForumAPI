@@ -9,7 +9,7 @@ import (
 )
 
 func main() {
-	postgres, err := database.NewPostgres("user=postgres dbname=postgres password=admin host=127.0.0.1 port=5432 sslmode=disable")
+	postgres, err := database.NewPostgres()
 
 	if err != nil {
 		log.Fatal(err)
