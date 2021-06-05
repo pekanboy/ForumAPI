@@ -986,7 +986,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 		if err != nil {
 			mes := models.Message{}
@@ -996,7 +996,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
+		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 		if err != nil {
 			mes := models.Message{}
