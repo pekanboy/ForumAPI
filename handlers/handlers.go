@@ -763,6 +763,30 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 	var args []interface{}
 	l := len(posts) - 1
 
+	if posts[0].Parent != 0 {
+		var parent int
+
+		row, _ := tx.Query(`SELECT thread FROM forum.post WHERE id = $1`, posts[0].Parent)
+
+		if row.Next() {
+			err := row.Scan(&parent)
+			if err != nil {
+				_ = tx.Rollback()
+				return
+			}
+		}
+
+		row.Close()
+
+		if parent != info.Id {
+			mes := models.Message{}
+			mes.Message = "Parent post was created in another thread"
+			httputils.Respond(w, http.StatusConflict, mes)
+			_ = tx.Rollback()
+			return
+		}
+	}
+
 	for i, item := range posts {
 		row, _ := tx.Query(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, item.Author)
 		if !row.Next() {
@@ -776,19 +800,6 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 		row.Close()
 
 		item.Thread = info.Id
-
-		if item.Parent != 0 {
-			var parentExiste int
-			err = tx.QueryRow(`SELECT id FROM forum.post WHERE id = $1 and thread = $2 LIMIT 1`, item.Parent, item.Thread).Scan(&parentExiste)
-
-			if err != nil {
-				mes := models.Message{}
-				mes.Message = "Parent post was created in another thread"
-				httputils.Respond(w, http.StatusConflict, mes)
-				_ = tx.Rollback()
-				return
-			}
-		}
 
 		item.Forum = info.Forum
 
