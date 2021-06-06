@@ -28,6 +28,53 @@ func (h *Handlers) Prepare() {
 	_, _ = h.conn.Prepare("insertVote", "INSERT INTO forum.vote(thread, nickname, voice) VALUES ($1, $2, $3)")
 	_, _ = h.conn.Prepare("updateVote", "UPDATE forum.vote SET voice = $3 WHERE thread = $1 and nickname = $2")
 	_, _ = h.conn.Prepare("selectVote", "SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1")
+
+	_, _ = h.conn.Prepare("insertUser", "INSERT INTO forum.\"user\"(nickname, fullname, about, email) VALUES ($1, $2, $3, $4)")
+	_, _ = h.conn.Prepare("selectDublicateUser", "SELECT nickname, fullname, about, email FROM forum.\"user\" WHERE nickname = $1 OR email = $2 LIMIT 2")
+	_, _ = h.conn.Prepare("selectUser", "SELECT nickname, fullname, about, email FROM forum.\"user\" WHERE nickname = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("checkUser", "SELECT nickname FROM forum.\"user\" WHERE nickname = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("changeUser", "UPDATE forum.\"user\" \n\t\t\t   SET fullname = COALESCE(NULLIF($1, ''), fullname),\n\t\t\t       about = COALESCE(NULLIF($2, ''), about),\n\t\t\t       email = COALESCE(NULLIF($3, ''), email) \n\t\t\t   WHERE nickname = $4 \n\t\t\t   RETURNING nickname, fullname, about, email")
+	_, _ = h.conn.Prepare("selectUserOrderDesc", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1\n\t\t\t\t\t\torder by nickname desc\n\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectUserOrder", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1\n\t\t\t\t\t\torder by nickname\n\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectUserWhereOrderDesc", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1 and nickname < $3\n\t\t\t\t\t\torder by nickname desc\n\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectUserWhereOrder", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1 and nickname > $3\n\t\t\t\t\t\torder by nickname\n\t\t\t\t\tlimit $2")
+
+	_, _ = h.conn.Prepare("insertForum", "INSERT INTO forum.forum(title, \"user\", slug)\n\t\t\t   VALUES ($1, $2, $3)")
+	_, _ = h.conn.Prepare("selectForum", "SELECT title, \"user\", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("checkForum", "SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1")
+
+	_, _ = h.conn.Prepare("insertThread", "INSERT INTO forum.thread(title, author, forum, message, votes, slug, created)\n\t\tVALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7)\n\t\tRETURNING id")
+	_, _ = h.conn.Prepare("selectThread", "SELECT id, title, author, forum, message, votes, slug, created\n\t\t\t\t\tFROM forum.thread\n\t\t\t\t\tWHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectThreadById", "SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectThreadOrderDesc", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1\n\t\t\t\t\t\torder by t.created desc\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectThreadOrder", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1\n\t\t\t\t\t\torder by t.created\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectThreadWhereOrderDesc", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1 and t.created <= $3\n\t\t\t\t\t\torder by t.created desc\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectThreadWhereOrder", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1 and t.created >= $3\n\t\t\t\t\t\torder by t.created\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectIdForumThreadBySlug", "SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectIdForumThreadById", "SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectThreadBySlug", "SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("updateThreadBySlug", "UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *")
+	_, _ = h.conn.Prepare("updateThreadById", "UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *")
+	_, _ = h.conn.Prepare("selectIdThreadById", "SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectIdThreadBySlug", "SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1")
+
+
+	_, _ = h.conn.Prepare("selectPost", "SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("updatePost", "UPDATE forum.post\n\t\t\t\tSET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end\n\t\t\t\tWHERE id = $2\n\t\t\t\tRETURNING id, parent, author, message, isEdited, forum, thread, created ")
+	_, _ = h.conn.Prepare("selectThreadIdFromPost", "SELECT thread FROM forum.post WHERE id = $1")
+	_, _ = h.conn.Prepare("treeDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1\n\t\t\t\t\t\t\tORDER BY path DESC, id DESC\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("tree", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1\n\t\t\t\t\t\t\tORDER BY path, id\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("treeDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1 and path < (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\tORDER BY path DESC, id DESC\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("treeSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1 and path > (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\tORDER BY path, id\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("parentTreeDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 and parent = 0\n\t\t\t\t\t\t\t\tORDER BY id DESC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path[1] DESC, path, id")
+	_, _ = h.conn.Prepare("parentTree", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0\n\t\t\t\t\t\t\t\tORDER BY id\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path")
+	_, _ = h.conn.Prepare("parentTreeDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0 and path[1] < (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\t\tORDER BY id DESC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path[1] DESC, path, id")
+	_, _ = h.conn.Prepare("parentTreeSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] in (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0 and path[1] > (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\t\tORDER BY id ASC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path, id")
+	_, _ = h.conn.Prepare("flatDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1\n\t\t\t\t\t   ORDER BY id DESC\n\t\t\t\t\t   LIMIT $2")
+	_, _ = h.conn.Prepare("flat", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1\n\t\t\t\t\t   ORDER BY id\n\t\t\t\t\t   LIMIT $2")
+	_, _ = h.conn.Prepare("flatDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1 and id < $3\n\t\t\t\t\t   ORDER BY id DESC\n\t\t\t\t\t   LIMIT $2")
+	_, _ = h.conn.Prepare("flatSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1 and id > $3\n\t\t\t\t\t   ORDER BY id\n\t\t\t\t\t   LIMIT $2")
+
 }
 
 // USER
@@ -43,7 +90,7 @@ func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err := h.conn.Exec(`INSERT INTO forum."user"(nickname, fullname, about, email) VALUES ($1, $2, $3, $4)`,
+	_, err := h.conn.Exec("insertUser",
 		user.Nickname,
 		user.Fullname,
 		user.About,
@@ -51,7 +98,7 @@ func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
 
 	if driverErr, ok := err.(pgx.PgError); ok {
 		if driverErr.Code == "23505" {
-			row, err := h.conn.Query(`SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 OR email = $2 LIMIT 2`, user.Nickname, user.Email)
+			row, err := h.conn.Query("selectDublicateUser", user.Nickname, user.Email)
 			if err != nil {
 				httputils.Respond(w, http.StatusInternalServerError, nil)
 				return
@@ -91,7 +138,7 @@ func (h *Handlers) GetUser(w http.ResponseWriter, r *http.Request) {
 
 	user := models.User{}
 
-	row, _ := h.conn.Query(`SELECT nickname, fullname, about, email FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
+	row, _ := h.conn.Query("selectUser", nickname)
 
 	if !row.Next() {
 		mes := models.Message{}
@@ -128,7 +175,7 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, _ := tx.Query(`SELECT id FROM forum."user" WHERE nickname = $1 LIMIT 1`, nickname)
+	row, _ := tx.Query("checkUser", nickname)
 
 	if !row.Next() {
 		mes := models.Message{}
@@ -140,12 +187,7 @@ func (h *Handlers) ChangeUser(w http.ResponseWriter, r *http.Request) {
 	row.Close()
 
 	err = tx.QueryRow(
-		`UPDATE forum."user" 
-			   SET fullname = COALESCE(NULLIF($1, ''), fullname),
-			       about = COALESCE(NULLIF($2, ''), about),
-			       email = COALESCE(NULLIF($3, ''), email) 
-			   WHERE nickname = $4 
-			   RETURNING nickname, fullname, about, email`,
+		"changeUser",
 		user.Fullname,
 		user.About,
 		user.Email,
@@ -189,7 +231,7 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = tx.QueryRow(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, forum.User).Scan(&forum.User)
+	err = tx.QueryRow("checkUser", forum.User).Scan(&forum.User)
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find user with nickname: " + forum.User
@@ -199,8 +241,7 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_, err = tx.Exec(
-		`INSERT INTO forum.forum(title, "user", slug)
-			   VALUES ($1, $2, $3)`,
+		"insertForum",
 		&forum.Title, &forum.User, &forum.Slug)
 
 	if err != nil {
@@ -212,7 +253,7 @@ func (h *Handlers) CreateForum(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var result models.Forum
-		err = tx.QueryRow(`SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, forum.Slug).Scan(
+		err = tx.QueryRow("selectForum", forum.Slug).Scan(
 			&result.Title, &result.User, &result.Slug, &result.Posts, &result.Threads)
 		if err != nil {
 			_ = tx.Rollback()
@@ -241,8 +282,8 @@ func (h *Handlers) GetForum(w http.ResponseWriter, r *http.Request) {
 
 	forum := models.Forum{}
 
-	err := h.conn.QueryRow(`SELECT slug, title, "user", posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, slug).Scan(
-		&forum.Slug, &forum.Title, &forum.User, &forum.Posts, &forum.Threads)
+	err := h.conn.QueryRow("selectForum", slug).Scan(
+		&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find forum with slug: " + slug
@@ -270,7 +311,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = tx.QueryRow(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, thread.Author).Scan(&thread.Author)
+	err = tx.QueryRow("checkUser", thread.Author).Scan(&thread.Author)
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find thread author by nickname: " + thread.Author
@@ -279,7 +320,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = tx.QueryRow(`SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum).Scan(&thread.Forum)
+	err = tx.QueryRow("checkForum", forum).Scan(&thread.Forum)
 	if err != nil {
 		mes := models.Message{}
 		mes.Message = "Can't find thread forum by slug: " + thread.Forum
@@ -291,10 +332,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		thread.Created = time.Now()
 	}
 
-	err = tx.QueryRow(`
-		INSERT INTO forum.thread(title, author, forum, message, votes, slug, created)
-		VALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7)
-		RETURNING id`,
+	err = tx.QueryRow("insertThread",
 		thread.Title,
 		thread.Author,
 		thread.Forum,
@@ -312,10 +350,7 @@ func (h *Handlers) CreateThread(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var result models.Thread
-		err := tx.QueryRow(`
-					SELECT id, title, author, forum, message, votes, slug, created
-					FROM forum.thread
-					WHERE slug = $1 LIMIT 1`,
+		err := tx.QueryRow("selectThread",
 			thread.Slug).Scan(
 			&result.Id,
 			&result.Title,
@@ -362,7 +397,7 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, _ := tx.Query(`SELECT id FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
+	row, _ := tx.Query("checkForum", forum)
 	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find forum by slug: " + forum
@@ -388,41 +423,25 @@ func (h *Handlers) GetForumUsers(w http.ResponseWriter, r *http.Request) {
 	if since == "" {
 		if desc {
 			row, err = tx.Query(
-				`select nickname, fullname, about, email
-						from forum.forum_users
-						WHERE forum = $1
-						order by nickname desc
-					limit $2`,
+				"selectUserOrderDesc",
 				&forum,
 				&limit)
 		} else {
 			row, err = tx.Query(
-				`select nickname, fullname, about, email
-						from forum.forum_users
-						WHERE forum = $1
-						order by nickname
-					limit $2`,
+				"selectUserOrder",
 				&forum,
 				&limit)
 		}
 	} else {
 		if desc {
 			row, err = tx.Query(
-				`select nickname, fullname, about, email
-						from forum.forum_users
-						WHERE forum = $1 and nickname < $3
-						order by nickname desc
-					limit $2`,
+				"selectUserWhereOrderDesc",
 				&forum,
 				&limit,
 				&since)
 		} else {
 			row, err = tx.Query(
-				`select nickname, fullname, about, email
-						from forum.forum_users
-						WHERE forum = $1 and nickname > $3
-						order by nickname
-					limit $2`,
+				"selectUserWhereOrder",
 				&forum,
 				&limit,
 				&since)
@@ -475,7 +494,7 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, _ := tx.Query(`SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1`, forum)
+	row, _ := tx.Query("checkForum", forum)
 	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find forum by slug: " + forum
@@ -500,42 +519,22 @@ func (h *Handlers) GetForumThreads(w http.ResponseWriter, r *http.Request) {
 	var threads []models.Thread
 	if since == "" {
 		if desc {
-			row, err = tx.Query(`
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
-						from forum.thread t
-						where t.forum = $1
-						order by t.created desc
-						limit $2`,
+			row, err = tx.Query("selectThreadOrderDesc",
 				&forum,
 				&limit)
 		} else {
-			row, err = tx.Query(`
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
-						from forum.thread t
-						where t.forum = $1
-						order by t.created
-						limit $2`,
+			row, err = tx.Query("selectThreadOrder",
 				&forum,
 				&limit)
 		}
 	} else {
 		if desc {
-			row, err = tx.Query(`
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
-						from forum.thread t
-						where t.forum = $1 and t.created <= $3
-						order by t.created desc
-						limit $2`,
+			row, err = tx.Query("selectThreadWhereOrderDesc",
 				&forum,
 				&limit,
 				&since)
 		} else {
-			row, err = tx.Query(`
-						select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created
-						from forum.thread t
-						where t.forum = $1 and t.created >= $3
-						order by t.created
-						limit $2`,
+			row, err = tx.Query("selectThreadWhereOrder",
 				&forum,
 				&limit,
 				&since)
@@ -606,7 +605,7 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var p models.Post
-	err = tx.QueryRow( `SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1`, post).Scan(
+	err = tx.QueryRow( "selectPost", post).Scan(
 		&p.Id, &p.Parent, &p.Author, &p.Message, &p.IsEdited, &p.Forum, &p.Thread, &p.Created)
 	if err != nil {
 		mes := models.Message{}
@@ -624,17 +623,17 @@ func (h *Handlers) GetPost(w http.ResponseWriter, r *http.Request) {
 
 	for _, item := range related {
 		if item == "user" {
-			err = tx.QueryRow( `SELECT nickname, fullname, about, email FROM forum.user WHERE nickname = $1 LIMIT 1`, result.Post.Author).Scan(
+			err = tx.QueryRow( "selectUser", result.Post.Author).Scan(
 				&user.Nickname, &user.Fullname, &user.About, &user.Email)
 			result.User = &user
 		}
 		if item == "forum" {
-			err = tx.QueryRow( `SELECT title, "user", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1`, result.Post.Forum).Scan(
+			err = tx.QueryRow( "selectForum", result.Post.Forum).Scan(
 				&forum.Title, &forum.User, &forum.Slug, &forum.Posts, &forum.Threads)
 			result.Forum = &forum
 		}
 		if item == "thread" {
-			err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, result.Post.Thread).Scan(
+			err = tx.QueryRow( "selectThreadById", result.Post.Thread).Scan(
 				&thread.Id, &thread.Title, &thread.Author, &thread.Forum, &thread.Message, &thread.Votes, &thread.Slug, &thread.Created)
 			result.Thread = &thread
 		}
@@ -676,11 +675,7 @@ func (h *Handlers) ChangePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = tx.QueryRow(`
-				UPDATE forum.post
-				SET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end
-				WHERE id = $2
-				RETURNING id, parent, author, message, isEdited, forum, thread, created `,
+	err = tx.QueryRow("updatePost",
 		post.Message,
 		post.Id).Scan(
 		&post.Id,
@@ -740,12 +735,12 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isId == -1 {
-		err = tx.QueryRow(`SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(&info.Id, &info.Forum)
+		err = tx.QueryRow("selectIdForumThreadBySlug", thread).Scan(&info.Id, &info.Forum)
 		if err != nil {
 			mes.Message = "Can't find post thread by slug: " + thread
 		}
 	} else {
-		err = tx.QueryRow(`SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(&info.Id, &info.Forum)
+		err = tx.QueryRow("selectIdForumThreadById", isId).Scan(&info.Id, &info.Forum)
 		if err != nil {
 			mes.Message = "Can't find post thread by id: " + strconv.Itoa(isId)
 		}
@@ -772,7 +767,7 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 	if posts[0].Parent != 0 {
 		var parent int
 
-		row, _ := tx.Query(`SELECT thread FROM forum.post WHERE id = $1`, posts[0].Parent)
+		row, _ := tx.Query("selectThreadIdFromPost", posts[0].Parent)
 
 		if row.Next() {
 			err := row.Scan(&parent)
@@ -794,7 +789,7 @@ func (h *Handlers) CreatePost(w http.ResponseWriter, r *http.Request) {
 	}
 
 	for i, item := range posts {
-		row, _ := tx.Query(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, item.Author)
+		row, _ := tx.Query("selectUser", item.Author)
 		if !row.Next() {
 			mes := models.Message{}
 			mes.Message = "Can't find post author by nickname: " + item.Author
@@ -867,11 +862,11 @@ func (h *Handlers) GetThread(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = h.conn.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+		err = h.conn.QueryRow( "selectThreadBySlug", thread).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	} else {
-		err = h.conn.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
-			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
+		err = h.conn.QueryRow( "selectThreadById", isId).Scan(
+			&result.Id, &result.Title, &result.Author,  &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 	}
 
 	if err != nil {
@@ -907,7 +902,7 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if isId == -1 {
-		err = tx.QueryRow(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *`,
+		err = tx.QueryRow("updateThreadBySlug",
 			result.Title,
 			result.Message,
 			result.Slug).Scan(
@@ -921,7 +916,7 @@ func (h *Handlers) ChangeThread(w http.ResponseWriter, r *http.Request) {
 			&result.Created)
 		mes.Message = "Can't find thread by slug: " + thread
 	} else {
-		err = tx.QueryRow(`UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *`,
+		err = tx.QueryRow("updateThreadById",
 			result.Title,
 			result.Message,
 			result.Id).Scan(
@@ -974,7 +969,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	row, _ := tx.Query(`SELECT nickname FROM forum."user" WHERE nickname = $1 LIMIT 1`, vote.Nickname)
+	row, _ := tx.Query("checkUser", vote.Nickname)
 	if !row.Next() {
 		mes := models.Message{}
 		mes.Message = "Can't find user by nickname: " + vote.Nickname
@@ -988,7 +983,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 
 	var result models.Thread
 	if isId == -1 {
-		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(
+		err = tx.QueryRow( "selectThreadBySlug", thread).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 		if err != nil {
 			mes := models.Message{}
@@ -998,7 +993,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		err = tx.QueryRow( `SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(
+		err = tx.QueryRow( "selectThreadById", isId).Scan(
 			&result.Id, &result.Title, &result.Author, &result.Forum, &result.Message, &result.Votes, &result.Slug, &result.Created)
 		if err != nil {
 			mes := models.Message{}
@@ -1080,7 +1075,7 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 	var id int
 	if isId != -1 {
 		id = isId
-		err := tx.QueryRow(`SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1`, isId).Scan(&id)
+		err := tx.QueryRow("selectIdThreadById", isId).Scan(&id)
 		if err != nil {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by id: " + thread
@@ -1089,7 +1084,7 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else {
-		err = tx.QueryRow( `SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1`, thread).Scan(&id)
+		err = tx.QueryRow( "selectIdThreadBySlug", thread).Scan(&id)
 		if err != nil {
 			mes := models.Message{}
 			mes.Message = "Can't find thread by slug: " + thread
@@ -1108,37 +1103,21 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 		if since == 0 {
 			if desc {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE thread = $1
-							ORDER BY path DESC, id DESC
-							LIMIT $2`,
+					"treeDesc",
 							id, limit)
 			} else {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE thread = $1
-							ORDER BY path, id
-							LIMIT $2`,
+					"tree",
 					id, limit)
 			}
 		} else {
 			if desc {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE thread = $1 and path < (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)
-							ORDER BY path DESC, id DESC
-							LIMIT $2`,
+					"treeDescSince",
 					id, limit, since)
 			} else {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE thread = $1 and path > (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)
-							ORDER BY path, id
-							LIMIT $2`,
+					"treeSince",
 					id, limit, since)
 			}
 		}
@@ -1146,53 +1125,21 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 		if since == 0 {
 			if desc {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE path[1] IN (
-								SELECT id
-								FROM forum.post
-								WHERE thread = $1 and parent = 0
-								ORDER BY id DESC
-								LIMIT $2)
-							ORDER BY path[1] DESC, path, id`,
+					"parentTreeDesc",
 							id, limit)
 			} else {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE path[1] IN (
-								SELECT id
-								FROM forum.post
-								WHERE thread = $1 AND parent = 0
-								ORDER BY id
-								LIMIT $2)
-							ORDER BY path`,
+					"parentTree",
 							id, limit)
 			}
 		} else {
 			if desc {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE path[1] IN (
-								SELECT id
-								FROM forum.post
-								WHERE thread = $1 AND parent = 0 and path[1] < (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)
-								ORDER BY id DESC
-								LIMIT $2)
-							ORDER BY path[1] DESC, path, id`,
+					"parentTreeDescSince",
 							id, limit, since)
 			} else {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-							FROM forum.post
-							WHERE path[1] in (
-								SELECT id
-								FROM forum.post
-								WHERE thread = $1 AND parent = 0 and path[1] > (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)
-								ORDER BY id ASC
-								LIMIT $2)
-							ORDER BY path, id`,
+					"parentTreeSince",
 					id, limit, since)
 			}
 		}
@@ -1200,21 +1147,13 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 		if since == 0 {
 			if desc {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-					   FROM forum.post
-					   WHERE thread = $1
-					   ORDER BY id DESC
-					   LIMIT $2`,
+					"flatDesc",
 					id,
 					limit,
 				)
 			} else {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-					   FROM forum.post
-					   WHERE thread = $1
-					   ORDER BY id
-					   LIMIT $2`,
+					"flat",
 					id,
 					limit,
 				)
@@ -1222,22 +1161,14 @@ func (h *Handlers) ThreadPosts(w http.ResponseWriter, r *http.Request) {
 		} else {
 			if desc {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-					   FROM forum.post
-					   WHERE thread = $1 and id < $3
-					   ORDER BY id DESC
-					   LIMIT $2`,
+					"flatDescSince",
 					id,
 					limit,
 					since,
 				)
 			} else {
 				row, err = tx.Query(
-					`SELECT id, author, created, forum, isEdited, message, parent, thread
-					   FROM forum.post
-					   WHERE thread = $1 and id > $3
-					   ORDER BY id
-					   LIMIT $2`,
+					"flatSince",
 					id,
 					limit,
 					since,
