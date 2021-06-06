@@ -24,59 +24,6 @@ func NewHandler(conn *pgx.ConnPool) *Handlers {
 	}
 }
 
-func (h *Handlers) Prepare() {
-	_, _ = h.conn.Prepare("insertVote", "INSERT INTO forum.vote(thread, nickname, voice) VALUES ($1, $2, $3)")
-	_, _ = h.conn.Prepare("updateVote", "UPDATE forum.vote SET voice = $3 WHERE thread = $1 and nickname = $2")
-	_, _ = h.conn.Prepare("selectVote", "SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1")
-
-	_, _ = h.conn.Prepare("insertUser", "INSERT INTO forum.\"user\"(nickname, fullname, about, email) VALUES ($1, $2, $3, $4)")
-	_, _ = h.conn.Prepare("selectDublicateUser", "SELECT nickname, fullname, about, email FROM forum.\"user\" WHERE nickname = $1 OR email = $2 LIMIT 2")
-	_, _ = h.conn.Prepare("selectUser", "SELECT nickname, fullname, about, email FROM forum.\"user\" WHERE nickname = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("checkUser", "SELECT nickname FROM forum.\"user\" WHERE nickname = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("changeUser", "UPDATE forum.\"user\" \n\t\t\t   SET fullname = COALESCE(NULLIF($1, ''), fullname),\n\t\t\t       about = COALESCE(NULLIF($2, ''), about),\n\t\t\t       email = COALESCE(NULLIF($3, ''), email) \n\t\t\t   WHERE nickname = $4 \n\t\t\t   RETURNING nickname, fullname, about, email")
-	_, _ = h.conn.Prepare("selectUserOrderDesc", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1\n\t\t\t\t\t\torder by nickname desc\n\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectUserOrder", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1\n\t\t\t\t\t\torder by nickname\n\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectUserWhereOrderDesc", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1 and nickname < $3\n\t\t\t\t\t\torder by nickname desc\n\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectUserWhereOrder", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1 and nickname > $3\n\t\t\t\t\t\torder by nickname\n\t\t\t\t\tlimit $2")
-
-	_, _ = h.conn.Prepare("insertForum", "INSERT INTO forum.forum(title, \"user\", slug)\n\t\t\t   VALUES ($1, $2, $3)")
-	_, _ = h.conn.Prepare("selectForum", "SELECT title, \"user\", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("checkForum", "SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1")
-
-	_, _ = h.conn.Prepare("insertThread", "INSERT INTO forum.thread(title, author, forum, message, votes, slug, created)\n\t\tVALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7)\n\t\tRETURNING id")
-	_, _ = h.conn.Prepare("selectThread", "SELECT id, title, author, forum, message, votes, slug, created\n\t\t\t\t\tFROM forum.thread\n\t\t\t\t\tWHERE slug = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("selectThreadById", "SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("selectThreadOrderDesc", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1\n\t\t\t\t\t\torder by t.created desc\n\t\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectThreadOrder", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1\n\t\t\t\t\t\torder by t.created\n\t\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectThreadWhereOrderDesc", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1 and t.created <= $3\n\t\t\t\t\t\torder by t.created desc\n\t\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectThreadWhereOrder", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1 and t.created >= $3\n\t\t\t\t\t\torder by t.created\n\t\t\t\t\t\tlimit $2")
-	_, _ = h.conn.Prepare("selectIdForumThreadBySlug", "SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("selectIdForumThreadById", "SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("selectThreadBySlug", "SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("updateThreadBySlug", "UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *")
-	_, _ = h.conn.Prepare("updateThreadById", "UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *")
-	_, _ = h.conn.Prepare("selectIdThreadById", "SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("selectIdThreadBySlug", "SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1")
-
-
-	_, _ = h.conn.Prepare("selectPost", "SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1")
-	_, _ = h.conn.Prepare("updatePost", "UPDATE forum.post\n\t\t\t\tSET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end\n\t\t\t\tWHERE id = $2\n\t\t\t\tRETURNING id, parent, author, message, isEdited, forum, thread, created ")
-	_, _ = h.conn.Prepare("selectThreadIdFromPost", "SELECT thread FROM forum.post WHERE id = $1")
-	_, _ = h.conn.Prepare("treeDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1\n\t\t\t\t\t\t\tORDER BY path DESC, id DESC\n\t\t\t\t\t\t\tLIMIT $2")
-	_, _ = h.conn.Prepare("tree", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1\n\t\t\t\t\t\t\tORDER BY path, id\n\t\t\t\t\t\t\tLIMIT $2")
-	_, _ = h.conn.Prepare("treeDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1 and path < (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\tORDER BY path DESC, id DESC\n\t\t\t\t\t\t\tLIMIT $2")
-	_, _ = h.conn.Prepare("treeSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1 and path > (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\tORDER BY path, id\n\t\t\t\t\t\t\tLIMIT $2")
-	_, _ = h.conn.Prepare("parentTreeDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 and parent = 0\n\t\t\t\t\t\t\t\tORDER BY id DESC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path[1] DESC, path, id")
-	_, _ = h.conn.Prepare("parentTree", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0\n\t\t\t\t\t\t\t\tORDER BY id\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path")
-	_, _ = h.conn.Prepare("parentTreeDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0 and path[1] < (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\t\tORDER BY id DESC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path[1] DESC, path, id")
-	_, _ = h.conn.Prepare("parentTreeSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] in (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0 and path[1] > (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\t\tORDER BY id ASC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path, id")
-	_, _ = h.conn.Prepare("flatDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1\n\t\t\t\t\t   ORDER BY id DESC\n\t\t\t\t\t   LIMIT $2")
-	_, _ = h.conn.Prepare("flat", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1\n\t\t\t\t\t   ORDER BY id\n\t\t\t\t\t   LIMIT $2")
-	_, _ = h.conn.Prepare("flatDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1 and id < $3\n\t\t\t\t\t   ORDER BY id DESC\n\t\t\t\t\t   LIMIT $2")
-	_, _ = h.conn.Prepare("flatSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1 and id > $3\n\t\t\t\t\t   ORDER BY id\n\t\t\t\t\t   LIMIT $2")
-
-}
-
 // USER
 
 func (h *Handlers) CreateUser(w http.ResponseWriter, r *http.Request) {
@@ -1228,39 +1175,39 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_, err = tx.Exec(`TRUNCATE forum.forum CASCADE`)
+	_, err = tx.Exec("delForum")
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum.post CASCADE`)
+	_, err = tx.Exec("delPost")
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum.thread CASCADE`)
+	_, err = tx.Exec("delThread")
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
-	_, err = tx.Exec(`TRUNCATE forum."user" CASCADE`)
-	if err != nil {
-		httputils.Respond(w, http.StatusInternalServerError, nil)
-		_ = tx.Rollback()
-		return
-	}
-
-	_, err = tx.Exec(`TRUNCATE forum.vote CASCADE`)
+	_, err = tx.Exec("delUser")
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
 		return
 	}
 
-	_, err = tx.Exec(`TRUNCATE forum.forum_users CASCADE`)
+	_, err = tx.Exec("delVote")
+	if err != nil {
+		httputils.Respond(w, http.StatusInternalServerError, nil)
+		_ = tx.Rollback()
+		return
+	}
+
+	_, err = tx.Exec("delForumUsers")
 	if err != nil {
 		httputils.Respond(w, http.StatusInternalServerError, nil)
 		_ = tx.Rollback()
@@ -1280,22 +1227,91 @@ func (h *Handlers) AllClear(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) AllInfo(w http.ResponseWriter, r *http.Request) {
 	var status models.Status
 
-	err := h.conn.QueryRow(`SELECT COUNT(*) FROM forum."user"`).Scan(&status.User)
+	err := h.conn.QueryRow("countUser").Scan(&status.User)
 	if err != nil {
 		status.User = 0
 	}
-	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.forum`).Scan(&status.Forum)
+	err = h.conn.QueryRow("countForum").Scan(&status.Forum)
 	if err != nil {
 		status.Forum = 0
 	}
-	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.thread`).Scan(&status.Thread)
+	err = h.conn.QueryRow("countThread").Scan(&status.Thread)
 	if err != nil {
 		status.Thread = 0
 	}
-	err = h.conn.QueryRow(`SELECT COUNT(*) FROM forum.post`).Scan(&status.Post)
+	err = h.conn.QueryRow("countPost").Scan(&status.Post)
 	if err != nil {
 		status.Post = 0
 	}
 
 	httputils.Respond(w, http.StatusOK, status)
+}
+
+// PREPARE
+
+func (h *Handlers) Prepare() {
+	_, _ = h.conn.Prepare("insertVote", "INSERT INTO forum.vote(thread, nickname, voice) VALUES ($1, $2, $3)")
+	_, _ = h.conn.Prepare("updateVote", "UPDATE forum.vote SET voice = $3 WHERE thread = $1 and nickname = $2")
+	_, _ = h.conn.Prepare("selectVote", "SELECT voice FROM forum.vote WHERE thread = $1 and nickname = $2 LIMIT 1")
+
+
+	_, _ = h.conn.Prepare("insertUser", "INSERT INTO forum.\"user\"(nickname, fullname, about, email) VALUES ($1, $2, $3, $4)")
+	_, _ = h.conn.Prepare("selectDublicateUser", "SELECT nickname, fullname, about, email FROM forum.\"user\" WHERE nickname = $1 OR email = $2 LIMIT 2")
+	_, _ = h.conn.Prepare("selectUser", "SELECT nickname, fullname, about, email FROM forum.\"user\" WHERE nickname = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("checkUser", "SELECT nickname FROM forum.\"user\" WHERE nickname = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("changeUser", "UPDATE forum.\"user\" \n\t\t\t   SET fullname = COALESCE(NULLIF($1, ''), fullname),\n\t\t\t       about = COALESCE(NULLIF($2, ''), about),\n\t\t\t       email = COALESCE(NULLIF($3, ''), email) \n\t\t\t   WHERE nickname = $4 \n\t\t\t   RETURNING nickname, fullname, about, email")
+	_, _ = h.conn.Prepare("selectUserOrderDesc", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1\n\t\t\t\t\t\torder by nickname desc\n\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectUserOrder", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1\n\t\t\t\t\t\torder by nickname\n\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectUserWhereOrderDesc", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1 and nickname < $3\n\t\t\t\t\t\torder by nickname desc\n\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectUserWhereOrder", "select nickname, fullname, about, email\n\t\t\t\t\t\tfrom forum.forum_users\n\t\t\t\t\t\tWHERE forum = $1 and nickname > $3\n\t\t\t\t\t\torder by nickname\n\t\t\t\t\tlimit $2")
+
+
+	_, _ = h.conn.Prepare("insertForum", "INSERT INTO forum.forum(title, \"user\", slug)\n\t\t\t   VALUES ($1, $2, $3)")
+	_, _ = h.conn.Prepare("selectForum", "SELECT title, \"user\", slug, posts, threads FROM forum.forum WHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("checkForum", "SELECT slug FROM forum.forum WHERE slug = $1 LIMIT 1")
+
+
+	_, _ = h.conn.Prepare("insertThread", "INSERT INTO forum.thread(title, author, forum, message, votes, slug, created)\n\t\tVALUES ($1, $2, $3, $4, $5, nullif($6, ''), $7)\n\t\tRETURNING id")
+	_, _ = h.conn.Prepare("selectThread", "SELECT id, title, author, forum, message, votes, slug, created\n\t\t\t\t\tFROM forum.thread\n\t\t\t\t\tWHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectThreadById", "SELECT id, title, author, forum, message, votes, coalesce(slug, '') as slug, created FROM forum.thread WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectThreadOrderDesc", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1\n\t\t\t\t\t\torder by t.created desc\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectThreadOrder", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1\n\t\t\t\t\t\torder by t.created\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectThreadWhereOrderDesc", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1 and t.created <= $3\n\t\t\t\t\t\torder by t.created desc\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectThreadWhereOrder", "select t.id, t.title, t.author, t.forum, t.message, t.votes, coalesce(t.slug, '') as slug, t.created\n\t\t\t\t\t\tfrom forum.thread t\n\t\t\t\t\t\twhere t.forum = $1 and t.created >= $3\n\t\t\t\t\t\torder by t.created\n\t\t\t\t\t\tlimit $2")
+	_, _ = h.conn.Prepare("selectIdForumThreadBySlug", "SELECT id, forum FROM forum.thread WHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectIdForumThreadById", "SELECT id, forum FROM forum.thread WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectThreadBySlug", "SELECT id, title, author, forum, message, votes, coalesce(slug, ''), created FROM forum.thread WHERE slug = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("updateThreadBySlug", "UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE slug = $3 RETURNING *")
+	_, _ = h.conn.Prepare("updateThreadById", "UPDATE forum.thread SET title = COALESCE(nullif($1, ''), title), message = COALESCE(nullif($2, ''), message) WHERE id = $3 RETURNING *")
+	_, _ = h.conn.Prepare("selectIdThreadById", "SELECT id as thread FROM forum.thread WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("selectIdThreadBySlug", "SELECT id as thread FROM forum.thread WHERE slug = $1 LIMIT 1")
+
+
+	_, _ = h.conn.Prepare("selectPost", "SELECT id, parent, author, message, isEdited, forum, thread, created FROM forum.post WHERE id = $1 LIMIT 1")
+	_, _ = h.conn.Prepare("updatePost", "UPDATE forum.post\n\t\t\t\tSET message = COALESCE(nullif($1, ''), message), isEdited = CASE $1 WHEN message THEN false WHEN '' THEN false ELSE true end\n\t\t\t\tWHERE id = $2\n\t\t\t\tRETURNING id, parent, author, message, isEdited, forum, thread, created ")
+	_, _ = h.conn.Prepare("selectThreadIdFromPost", "SELECT thread FROM forum.post WHERE id = $1")
+	_, _ = h.conn.Prepare("treeDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1\n\t\t\t\t\t\t\tORDER BY path DESC, id DESC\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("tree", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1\n\t\t\t\t\t\t\tORDER BY path, id\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("treeDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1 and path < (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\tORDER BY path DESC, id DESC\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("treeSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE thread = $1 and path > (SELECT path FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\tORDER BY path, id\n\t\t\t\t\t\t\tLIMIT $2")
+	_, _ = h.conn.Prepare("parentTreeDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 and parent = 0\n\t\t\t\t\t\t\t\tORDER BY id DESC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path[1] DESC, path, id")
+	_, _ = h.conn.Prepare("parentTree", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0\n\t\t\t\t\t\t\t\tORDER BY id\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path")
+	_, _ = h.conn.Prepare("parentTreeDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] IN (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0 and path[1] < (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\t\tORDER BY id DESC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path[1] DESC, path, id")
+	_, _ = h.conn.Prepare("parentTreeSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\tWHERE path[1] in (\n\t\t\t\t\t\t\t\tSELECT id\n\t\t\t\t\t\t\t\tFROM forum.post\n\t\t\t\t\t\t\t\tWHERE thread = $1 AND parent = 0 and path[1] > (SELECT path[1] FROM forum.post WHERE id = $3 LIMIT 1)\n\t\t\t\t\t\t\t\tORDER BY id ASC\n\t\t\t\t\t\t\t\tLIMIT $2)\n\t\t\t\t\t\t\tORDER BY path, id")
+	_, _ = h.conn.Prepare("flatDesc", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1\n\t\t\t\t\t   ORDER BY id DESC\n\t\t\t\t\t   LIMIT $2")
+	_, _ = h.conn.Prepare("flat", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1\n\t\t\t\t\t   ORDER BY id\n\t\t\t\t\t   LIMIT $2")
+	_, _ = h.conn.Prepare("flatDescSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1 and id < $3\n\t\t\t\t\t   ORDER BY id DESC\n\t\t\t\t\t   LIMIT $2")
+	_, _ = h.conn.Prepare("flatSince", "SELECT id, author, created, forum, isEdited, message, parent, thread\n\t\t\t\t\t   FROM forum.post\n\t\t\t\t\t   WHERE thread = $1 and id > $3\n\t\t\t\t\t   ORDER BY id\n\t\t\t\t\t   LIMIT $2")
+
+
+	_, _ = h.conn.Prepare("delForum", "TRUNCATE forum.forum CASCADE")
+	_, _ = h.conn.Prepare("delPost", "TRUNCATE forum.post CASCADE")
+	_, _ = h.conn.Prepare("delThread", "TRUNCATE forum.thread CASCADE")
+	_, _ = h.conn.Prepare("delUser", "TRUNCATE forum.\"user\" CASCADE")
+	_, _ = h.conn.Prepare("delVote", "TRUNCATE forum.vote CASCADE")
+	_, _ = h.conn.Prepare("delForumUsers", "TRUNCATE forum.forum_users CASCADE")
+	_, _ = h.conn.Prepare("countUser", "SELECT COUNT(*) FROM forum.\"user\"")
+	_, _ = h.conn.Prepare("countForum", "SELECT COUNT(*) FROM forum.forum")
+	_, _ = h.conn.Prepare("countThread", "SELECT COUNT(*) FROM forum.thread")
+	_, _ = h.conn.Prepare("countPost", "SELECT COUNT(*) FROM forum.post")
 }
