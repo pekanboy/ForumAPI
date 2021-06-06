@@ -118,6 +118,7 @@ CREATE UNLOGGED TABLE forum.thread
 CREATE INDEX IF NOT EXISTS thread_slug_id ON forum.thread using hash (slug);
 CREATE INDEX IF NOT EXISTS thread_created ON forum.thread (created);
 CREATE INDEX IF NOT EXISTS thread_forum ON forum.thread using hash (forum);
+CREATE INDEX IF NOT EXISTS thread_all on forum.thread (forum, slug, created,title, author, message, votes);
 
 DROP TRIGGER IF EXISTS forum_thread ON forum.thread;
 CREATE TRIGGER forum_thread
