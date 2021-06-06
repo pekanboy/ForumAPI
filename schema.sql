@@ -74,14 +74,14 @@ $$ LANGUAGE plpgsql;
 
 CREATE UNLOGGED TABLE forum.user
 (
-    id       BIGSERIAL PRIMARY KEY,
-    nickname citext collate "POSIX" UNIQUE NOT NULL,
-    fullname TEXT                          NOT NULL,
+    nickname citext collate "POSIX" PRIMARY KEY NOT NULL,
+    fullname TEXT                               NOT NULL,
     about    TEXT,
-    email    citext UNIQUE                 NOT NULL
+    email    citext UNIQUE                      NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS nickname ON forum.user (nickname, fullname, about, email);
+CREATE INDEX IF NOT EXISTS user_all ON forum.user (nickname, fullname, about, email);
+create index if not exists nickname on forum.user using hash (nickname);
 
 -- FORUM
 
@@ -115,9 +115,9 @@ CREATE UNLOGGED TABLE forum.thread
         REFERENCES forum.forum (slug)
 );
 
-CREATE INDEX IF NOT EXISTS thread_slug_id ON forum.thread (slug);
+CREATE INDEX IF NOT EXISTS thread_slug_id ON forum.thread using hash (slug);
 CREATE INDEX IF NOT EXISTS thread_created ON forum.thread (created);
-CREATE INDEX IF NOT EXISTS thread_forum ON forum.thread (forum);
+CREATE INDEX IF NOT EXISTS thread_forum ON forum.thread using hash (forum);
 
 DROP TRIGGER IF EXISTS forum_thread ON forum.thread;
 CREATE TRIGGER forum_thread
@@ -162,10 +162,9 @@ EXECUTE PROCEDURE forum.forum_posts_inc();
 
 CREATE UNLOGGED TABLE forum.vote
 (
-    id       BIGSERIAL NOT NULL,
-    thread   bigint NOT NULL,
-    nickname citext NOT NULL,
-    voice    BIGINT NOT NULL,
+    thread   bigint    NOT NULL,
+    nickname citext    NOT NULL,
+    voice    BIGINT    NOT NULL,
     FOREIGN KEY (thread)
         REFERENCES forum.thread (id),
     FOREIGN KEY (nickname)
@@ -173,7 +172,7 @@ CREATE UNLOGGED TABLE forum.vote
     PRIMARY KEY (thread, nickname)
 );
 
-CREATE INDEX IF NOT EXISTS vote_full on forum.vote (thread, nickname, voice)
+CREATE INDEX IF NOT EXISTS vote_full on forum.vote (thread, nickname, voice);
 
 DROP TRIGGER IF EXISTS forum_vote ON forum.vote;
 CREATE TRIGGER forum_vote
@@ -197,7 +196,7 @@ CREATE UNLOGGED TABLE forum.forum_users
     nickname citext collate "POSIX" NOT NULL,
     fullname TEXT                   NOT NULL,
     about    TEXT,
-    email    citext          NOT NULL,
+    email    citext                 NOT NULL,
     FOREIGN KEY (forum)
         REFERENCES forum.forum (slug),
     FOREIGN KEY (nickname)
