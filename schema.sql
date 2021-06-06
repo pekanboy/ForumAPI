@@ -149,6 +149,7 @@ CREATE UNLOGGED TABLE forum.post
 
 create index if not exists post_thread_parent on forum.post (thread, parent);
 create index if not exists post_pathOne_id_parent on forum.post ((path[1]), id);
+create index post_path on forum.post using gin (path);
 
 DROP TRIGGER IF EXISTS forum_post ON forum.post;
 CREATE TRIGGER forum_post
