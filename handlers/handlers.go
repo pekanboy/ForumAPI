@@ -1014,6 +1014,7 @@ func (h *Handlers) CreateVote(w http.ResponseWriter, r *http.Request) {
 	var vot int
 	_, err = tx.Exec("insertVote", vote.Thread, vote.Nickname, vote.Voice)
 	if err != nil {
+		_ = tx.Rollback()
 		tx, err = h.conn.Begin()
 		if err != nil {
 			httputils.Respond(w, http.StatusInternalServerError, nil)
