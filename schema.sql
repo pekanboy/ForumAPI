@@ -81,6 +81,8 @@ CREATE UNLOGGED TABLE forum.user
     email    citext UNIQUE                 NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS nickname ON forum.user (nickname, fullname, about, email);
+
 -- FORUM
 
 CREATE UNLOGGED TABLE forum.forum
@@ -113,6 +115,8 @@ CREATE UNLOGGED TABLE forum.thread
         REFERENCES forum.forum (slug)
 );
 
+CREATE INDEX IF NOT EXISTS thread_slug_id ON forum.thread (slug, id);
+
 DROP TRIGGER IF EXISTS forum_thread ON forum.thread;
 CREATE TRIGGER forum_thread
     AFTER INSERT
@@ -141,6 +145,9 @@ CREATE UNLOGGED TABLE forum.post
         REFERENCES forum.thread (id)
 );
 
+create index if not exists post_thread_parent on forum.post (thread, parent);
+create index if not exists post_pathOne_id_parent on forum.post ((path[1]), id);
+
 DROP TRIGGER IF EXISTS forum_post ON forum.post;
 CREATE TRIGGER forum_post
     BEFORE INSERT
@@ -162,6 +169,8 @@ CREATE UNLOGGED TABLE forum.vote
         REFERENCES forum.user (nickname),
     PRIMARY KEY (thread, nickname)
 );
+
+CREATE INDEX IF NOT EXISTS vote_full on forum.vote (thread, nickname, voice)
 
 DROP TRIGGER IF EXISTS forum_vote ON forum.vote;
 CREATE TRIGGER forum_vote
@@ -192,8 +201,3 @@ CREATE UNLOGGED TABLE forum.forum_users
         REFERENCES forum.user (nickname),
     PRIMARY KEY (nickname, forum)
 );
-
-SELECT pg_terminate_backend(pg_stat_activity.pid)
-FROM pg_stat_activity
-WHERE pg_stat_activity.datname = 'postgres' -- ← change this to your DB
-  AND pid <> pg_backend_pid();
